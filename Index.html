@@ -98,11 +98,69 @@
         </div>
       </section>
 
-      <!-- Screen 3: LỊCH SỬ (History) -->
+      <!-- Screen 3: LỊCH SỬ (History) with Task 4.3 Filters -->
       <section id="view-history" class="view" aria-label="Màn hình Lịch sử">
         <div class="section-title">
           <span>Lịch Sử Ván Đấu</span>
         </div>
+
+        <!-- Collapsible Filter Panel -->
+        <div class="filter-card">
+          <div class="filter-header" onclick="toggleFilterPanel()">
+            <div class="filter-header__title">
+              <span>🔍 Bộ lọc lịch sử</span>
+              <span id="filter-active-count" class="badge badge--leader" style="display: none;">0</span>
+            </div>
+            <span id="filter-arrow-icon" style="font-size: 0.85rem; color: var(--text-muted);">▼</span>
+          </div>
+          <div id="filter-body" class="filter-body">
+            <div class="filter-grid">
+              <div class="filter-group">
+                <label class="filter-label" for="filter-player">Người chơi:</label>
+                <select id="filter-player" class="filter-select">
+                  <option value="">-- Tất cả --</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-leader">Người cầm đầu (A):</label>
+                <select id="filter-leader" class="filter-select">
+                  <option value="">-- Tất cả --</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-result">Kết quả:</label>
+                <select id="filter-result" class="filter-select">
+                  <option value="ALL">Tất cả</option>
+                  <option value="WIN">Thắng (+)</option>
+                  <option value="DRAW">Hòa (0)</option>
+                  <option value="LOSE">Thua (-)</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-status">Trạng thái ván:</label>
+                <select id="filter-status" class="filter-select">
+                  <option value="HOP_LE">Ván hợp lệ</option>
+                  <option value="ALL">Tất cả (cả đã hủy)</option>
+                  <option value="DA_CHINH_SUA">Đã chỉnh sửa</option>
+                  <option value="DA_HUY">Đã hủy</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-from-game">Từ ván:</label>
+                <input type="number" id="filter-from-game" class="filter-select" min="1" placeholder="Số ván...">
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-to-game">Đến ván:</label>
+                <input type="number" id="filter-to-game" class="filter-select" min="1" placeholder="Số ván...">
+              </div>
+            </div>
+            <div class="filter-actions">
+              <button type="button" class="icon-button" style="width: auto; height: 38px; padding: 0 12px; font-size: 0.85rem;" onclick="resetHistoryFilters()">Xóa lọc</button>
+              <button type="button" class="btn-secondary" style="min-height: 38px; padding: 0 16px; font-size: 0.85rem;" onclick="applyHistoryFilters()">Áp dụng</button>
+            </div>
+          </div>
+        </div>
+
         <div id="history-container">
           <!-- Dynamic History List -->
         </div>
@@ -167,9 +225,72 @@
       </div>
     </nav>
 
+    <!-- Phase 4: Quick Undo Floating Banner (Task 4.5) -->
+    <div id="quick-undo-banner" class="quick-undo-banner">
+      <div class="quick-undo__content">
+        <span>⚡</span>
+        <span id="quick-undo-text">Đã chốt ván #1</span>
+      </div>
+      <div class="quick-undo__actions">
+        <button type="button" class="btn-undo" onclick="triggerQuickUndo()">Hoàn tác (<span id="quick-undo-countdown">8</span>s)</button>
+        <button type="button" class="icon-button" style="color: #fff; width: 32px; height: 32px;" onclick="dismissQuickUndo()">✕</button>
+      </div>
+      <div id="quick-undo-progress" class="quick-undo__progress"></div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
+  </div>
+
+  <!-- Phase 4: Modal Xem Chi Tiết Ván (Task 4.2) -->
+  <div id="modal-game-detail" class="modal-backdrop" onclick="if(event.target === this) closeGameDetailModal();">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div id="modal-detail-title" class="modal-title">Chi Tiết Ván Đấu</div>
+        <button type="button" class="icon-button" onclick="closeGameDetailModal()" title="Đóng">✕</button>
+      </div>
+      <div id="modal-detail-body" class="modal-body">
+        <!-- Dynamic Detail Content -->
+      </div>
+      <div id="modal-detail-footer" class="modal-footer">
+        <!-- Dynamic Action Buttons (Sửa, Hủy, Khôi phục, Đóng) -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4: Modal Chỉnh Sửa Ván (Task 4.4) -->
+  <div id="modal-edit-game" class="modal-backdrop" onclick="if(event.target === this) closeEditGameModal();">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div id="modal-edit-title" class="modal-title">Chỉnh Sửa Ván Đấu</div>
+        <button type="button" class="icon-button" onclick="closeEditGameModal()" title="Đóng">✕</button>
+      </div>
+      <div id="modal-edit-body" class="modal-body">
+        <!-- Dynamic Edit Content -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" style="background-color: var(--bg-subtle); color: var(--text-main);" onclick="closeEditGameModal()">Hủy Bỏ</button>
+        <button type="button" id="btn-save-edit-game" class="btn-secondary" onclick="submitUpdateGame()">Lưu Thay Đổi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4: Modal Xác Nhận (Confirm Dialog) -->
+  <div id="modal-confirm" class="modal-backdrop" onclick="if(event.target === this) closeConfirmModal();">
+    <div class="modal-dialog" style="max-width: 420px; margin: auto; border-radius: var(--radius-lg);">
+      <div class="modal-header">
+        <div id="confirm-modal-title" class="modal-title">Xác nhận</div>
+        <button type="button" class="icon-button" onclick="closeConfirmModal()">✕</button>
+      </div>
+      <div id="confirm-modal-body" class="modal-body" style="font-size: 0.95rem; line-height: 1.6;">
+        <!-- Confirmation text -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" style="background-color: var(--bg-subtle); color: var(--text-main);" onclick="closeConfirmModal()">Không</button>
+        <button type="button" id="btn-confirm-action" class="btn-secondary" style="background-color: var(--color-danger);">Đồng ý</button>
+      </div>
+    </div>
   </div>
 
   <!-- Include Reusable Component SVG Definitions -->

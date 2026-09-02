@@ -2,11 +2,11 @@
 /**
  * ==========================================================================
  * Scripts.html - Frontend Application Logic, State Management & API Adapter
- * Google Apps Script Web App (Mobile First)
+ * Google Apps Script Web App (Mobile First) - Phase 4 Comprehensive
  * ==========================================================================
  */
 
-// Central Application State
+// Central Application Reactive State
 const appState = {
   currentView: 'scoreboard',
   session: {
@@ -20,6 +20,15 @@ const appState = {
   players: [],
   scoreboard: [],
   history: [],
+  historyFilters: {
+    playerId: '',
+    leaderId: '',
+    result: 'ALL',
+    status: 'HOP_LE',
+    fromGameNumber: '',
+    toGameNumber: '',
+    isPanelOpen: false
+  },
   newGame: {
     leaderId: null,
     defaultBet: 5,
@@ -29,28 +38,40 @@ const appState = {
     editingBet: false,
     editingCustomBetId: null
   },
+  editingGame: {
+    gameId: null,
+    gameNumber: null,
+    leaderId: null,
+    defaultBet: 5,
+    customBets: {},
+    results: {},
+    note: ''
+  },
+  quickUndo: {
+    active: false,
+    gameId: null,
+    gameNumber: null,
+    timerId: null,
+    intervalId: null,
+    remainingSeconds: 8
+  },
   loading: {
     app: true,
     scoreboard: false,
     newGame: false,
     history: false,
     players: false,
-    settings: false
+    settings: false,
+    detailModal: false
   },
   isSubmitting: false,
   errors: {}
 };
 
 // ==========================================================================
-// 1. API Client Adapter (Promise wrapper for google.script.run)
+// 1. API Client Adapter (Promise wrapper for google.script.run with Fallback)
 // ==========================================================================
 const apiClient = {
-  /**
-   * Calls a server-side Apps Script function by name.
-   * @param {string} functionName - Function name on Apps Script backend
-   * @param {...any} args - Arguments to pass
-   * @returns {Promise<any>} Response data
-   */
   call(functionName, ...args) {
     return new Promise((resolve, reject) => {
       if (typeof google !== 'undefined' && google.script && google.script.run) {
@@ -76,7 +97,7 @@ const apiClient = {
         console.warn(`[Mock API] google.script.run not available. Simulating: ${functionName}`);
         setTimeout(() => {
           resolve(mockApiResponse(functionName, args));
-        }, 300);
+        }, 250);
       }
     });
   }
@@ -104,27 +125,52 @@ function mockApiResponse(fn, args) {
     ];
   }
   if (fn === 'getGameHistory') {
-    return [
-      {
-        gameId: 'V000001', gameNumber: 1, playedAt: new Date().toISOString(),
-        leaderId: 'P001', leaderName: 'An Nguyễn', defaultBet: 5, leaderDelta: 15, transactionTotal: 15,
-        details: [
-          { playerId: 'P002', name: 'Bình Trần', result: 'LOSE', bet: 5, delta: -5 },
-          { playerId: 'P003', name: 'Cường Lê', result: 'LOSE', bet: 5, delta: -5 },
-          { playerId: 'P004', name: 'Dũng Phạm', result: 'LOSE', bet: 5, delta: -5 }
-        ],
-        status: 'HOP_LE'
-      }
-    ];
+    return {
+      items: [
+        {
+          gameId: 'V000001', gameNumber: 1, playedAt: new Date().toISOString(),
+          leaderId: 'P001', leaderName: 'An Nguyễn', defaultBet: 5, leaderDelta: 15, transactionTotal: 15,
+          details: [
+            { playerId: 'P002', name: 'Bình Trần', result: 'LOSE', bet: 5, delta: -5 },
+            { playerId: 'P003', name: 'Cường Lê', result: 'LOSE', bet: 5, delta: -5 },
+            { playerId: 'P004', name: 'Dũng Phạm', result: 'LOSE', bet: 5, delta: -5 }
+          ],
+          status: 'HOP_LE', canEdit: true, canCancel: true, canRestore: false, isEdited: false, isCancelled: false
+        }
+      ],
+      total: 1
+    };
+  }
+  if (fn === 'getGameDetail') {
+    return {
+      gameId: args[0], gameNumber: 1, playedAt: new Date().toISOString(),
+      leaderId: 'P001', leaderName: 'An Nguyễn', defaultBet: 5, leaderDelta: 15, transactionTotal: 15,
+      details: [
+        { playerId: 'P002', name: 'Bình Trần', result: 'LOSE', bet: 5, delta: -5 },
+        { playerId: 'P003', name: 'Cường Lê', result: 'LOSE', bet: 5, delta: -5 },
+        { playerId: 'P004', name: 'Dũng Phạm', result: 'LOSE', bet: 5, delta: -5 }
+      ],
+      participants: [
+        { playerId: 'P001', name: 'An Nguyễn', role: 'LEADER', roleLabel: 'Người cầm đầu (A)', result: 'WIN', bet: 5, delta: 15 },
+        { playerId: 'P002', name: 'Bình Trần', role: 'OPPONENT', roleLabel: 'Người đối đầu', result: 'LOSE', bet: 5, delta: -5 },
+        { playerId: 'P003', name: 'Cường Lê', role: 'OPPONENT', roleLabel: 'Người đối đầu', result: 'LOSE', bet: 5, delta: -5 },
+        { playerId: 'P004', name: 'Dũng Phạm', role: 'OPPONENT', roleLabel: 'Người đối đầu', result: 'LOSE', bet: 5, delta: -5 }
+      ],
+      status: 'HOP_LE', canEdit: true, canCancel: true, canRestore: false
+    };
   }
   if (fn === 'saveGame') {
     return {
       game: { gameId: 'V000002', gameNumber: 2, playedAt: new Date().toISOString(), leaderDelta: 0, status: 'HOP_LE' },
-      scoreboard: []
+      scoreboard: [],
+      undoExpiresAt: new Date(Date.now() + 8000).toISOString()
     };
   }
-  if (fn === 'addPlayer') {
-    return { playerId: 'P005', name: args[0], order: 5, active: true, status: 'DANG_CHOI' };
+  if (fn === 'updateGame' || fn === 'cancelGame' || fn === 'restoreGame' || fn === 'undoGame') {
+    return {
+      game: { gameId: args[0], status: fn === 'cancelGame' || fn === 'undoGame' ? 'DA_HUY' : 'HOP_LE' },
+      scoreboard: []
+    };
   }
   return {};
 }
@@ -139,7 +185,6 @@ function navigateTo(viewName) {
 
   appState.currentView = viewName;
 
-  // Toggle View Containers
   document.querySelectorAll('.view').forEach((el) => {
     el.classList.remove('view--active');
   });
@@ -148,7 +193,6 @@ function navigateTo(viewName) {
     targetView.classList.add('view--active');
   }
 
-  // Update Nav Items
   document.querySelectorAll('.nav-item').forEach((el) => {
     el.classList.remove('nav-item--active');
     if (el.dataset.view === viewName) {
@@ -156,12 +200,12 @@ function navigateTo(viewName) {
     }
   });
 
-  // Render view-specific content
   if (viewName === 'scoreboard') {
     renderScoreboardView();
   } else if (viewName === 'new-game') {
     renderNewGameView();
   } else if (viewName === 'history') {
+    populateFilterSelects();
     loadHistory();
   } else if (viewName === 'players') {
     renderPlayersView();
@@ -169,7 +213,6 @@ function navigateTo(viewName) {
     renderSettingsView();
   }
 
-  // Scroll to top of main area
   const mainEl = document.querySelector('.app-main');
   if (mainEl) mainEl.scrollTop = 0;
 }
@@ -199,8 +242,6 @@ function loadScoreboard() {
 function renderScoreboardView() {
   const container = document.getElementById('scoreboard-container');
   if (!container) return;
-
-  // Clear previous content
   container.innerHTML = '';
 
   if (appState.loading.scoreboard) {
@@ -301,7 +342,6 @@ function renderScoreboardView() {
 function renderNewGameView() {
   const activePlayers = (appState.players || []).filter((p) => p.active);
 
-  // Auto-select first active player as Leader if none selected
   if (!appState.newGame.leaderId && activePlayers.length > 0) {
     appState.newGame.leaderId = activePlayers[0].playerId;
   }
@@ -313,7 +353,6 @@ function renderNewGameView() {
   renderStep6SubmitButton();
 }
 
-// Step 1: Leader Selection
 function renderStep1Leader(activePlayers) {
   const container = document.getElementById('step-leader-list');
   if (!container) return;
@@ -336,7 +375,6 @@ function renderStep1Leader(activePlayers) {
 
     chip.addEventListener('click', () => {
       appState.newGame.leaderId = player.playerId;
-      // Re-render New Game view upon leader change
       renderNewGameView();
     });
 
@@ -344,7 +382,6 @@ function renderStep1Leader(activePlayers) {
   });
 }
 
-// Step 2: Default Bet Editor
 function renderStep2DefaultBet() {
   const container = document.getElementById('step-default-bet-container');
   if (!container) return;
@@ -383,10 +420,7 @@ function startEditDefaultBet() {
   appState.newGame.editingBet = true;
   renderStep2DefaultBet();
   const input = document.getElementById('input-default-bet');
-  if (input) {
-    input.focus();
-    input.select();
-  }
+  if (input) { input.focus(); input.select(); }
 }
 
 function cancelEditDefaultBet() {
@@ -399,7 +433,7 @@ function saveDefaultBet() {
   if (!input) return;
   const val = parseInt(input.value, 10);
   if (isNaN(val) || val < 0) {
-    showToast('Mức cược phải là số nguyên lớn hơn hoặc bằng 0', 'error');
+    showToast('Mức cược phải là số nguyên >= 0', 'error');
     return;
   }
   appState.newGame.defaultBet = val;
@@ -407,7 +441,6 @@ function saveDefaultBet() {
   renderNewGameView();
 }
 
-// Step 3 & 4: Opponent Cards with Fast Buttons (+ / 0 / -) and Custom Bet
 function renderStep3Opponents(activePlayers) {
   const container = document.getElementById('step-opponents-list');
   if (!container) return;
@@ -427,14 +460,12 @@ function renderStep3Opponents(activePlayers) {
       ? appState.newGame.customBets[opp.playerId]
       : appState.newGame.defaultBet;
 
-    // Delta calculation
     let delta = 0;
     if (currentResult === 'WIN') delta = effectiveBet;
     else if (currentResult === 'LOSE') delta = -effectiveBet;
 
     card.className = `opp-card ${currentResult === 'WIN' ? 'opp-card--win' : currentResult === 'LOSE' ? 'opp-card--lose' : currentResult === 'DRAW' ? 'opp-card--draw' : ''}`;
 
-    // Card Header: Name & Delta
     const headerEl = document.createElement('div');
     headerEl.className = 'opp-card__header';
 
@@ -449,11 +480,9 @@ function renderStep3Opponents(activePlayers) {
     headerEl.appendChild(nameEl);
     headerEl.appendChild(deltaEl);
 
-    // 3 Quick Action Buttons
     const btnGroup = document.createElement('div');
     btnGroup.className = 'quick-buttons-group';
 
-    // Button WIN (+ Thắng)
     const btnWin = document.createElement('button');
     btnWin.type = 'button';
     btnWin.className = 'btn-result btn-result--win';
@@ -466,7 +495,6 @@ function renderStep3Opponents(activePlayers) {
       renderStep6SubmitButton();
     });
 
-    // Button DRAW (0 Hòa)
     const btnDraw = document.createElement('button');
     btnDraw.type = 'button';
     btnDraw.className = 'btn-result btn-result--draw';
@@ -479,7 +507,6 @@ function renderStep3Opponents(activePlayers) {
       renderStep6SubmitButton();
     });
 
-    // Button LOSE (- Thua)
     const btnLose = document.createElement('button');
     btnLose.type = 'button';
     btnLose.className = 'btn-result btn-result--lose';
@@ -496,7 +523,6 @@ function renderStep3Opponents(activePlayers) {
     btnGroup.appendChild(btnDraw);
     btnGroup.appendChild(btnLose);
 
-    // Custom Bet Section
     const customBetEl = document.createElement('div');
     customBetEl.className = 'opp-card__custom-bet';
 
@@ -538,10 +564,7 @@ function startEditCustomBet(playerId) {
   appState.newGame.editingCustomBetId = playerId;
   renderNewGameView();
   const input = document.getElementById(`input-custom-bet-${playerId}`);
-  if (input) {
-    input.focus();
-    input.select();
-  }
+  if (input) { input.focus(); input.select(); }
 }
 
 function cancelEditCustomBet() {
@@ -567,7 +590,6 @@ function resetCustomBet(playerId) {
   renderNewGameView();
 }
 
-// Step 5: Summary Preview Bar
 function renderStep5Preview(activePlayers) {
   const container = document.getElementById('step-preview-container');
   if (!container) return;
@@ -613,14 +635,13 @@ function renderStep5Preview(activePlayers) {
       </div>
       ${unchosenCount > 0 ? `
         <div class="preview-warning">
-          <span>⚠️ Có ${unchosenCount} người chưa chọn kết quả (sẽ mặc định tính là Hòa 0đ)</span>
+          <span>⚠️ Có ${unchosenCount} người chưa chọn kết quả (sẽ tính là Hòa 0đ)</span>
         </div>
       ` : ''}
     </div>
   `;
 }
 
-// Step 6: Submit "Chốt Ván" Button
 function renderStep6SubmitButton() {
   const btn = document.getElementById('btn-submit-game');
   if (!btn) return;
@@ -635,7 +656,6 @@ function renderStep6SubmitButton() {
     : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Chốt Ván Đấu';
 }
 
-// Submit Game Action
 function submitGame() {
   if (appState.isSubmitting) return;
 
@@ -651,7 +671,6 @@ function submitGame() {
     return;
   }
 
-  // Construct payload
   const opponentPayloads = opponents.map((opp) => {
     const res = appState.newGame.results[opp.playerId] || 'DRAW';
     const bet = appState.newGame.customBets[opp.playerId] !== undefined
@@ -680,17 +699,20 @@ function submitGame() {
     .then((result) => {
       showToast(`Đã chốt ván đấu #${result && result.game ? result.game.gameNumber : ''} thành công!`, 'success');
 
-      // Reset newGame state for next round (preserve leader & defaultBet)
+      // Reset newGame state
       appState.newGame.results = {};
       appState.newGame.customBets = {};
       appState.newGame.note = '';
 
-      // Update scoreboard if returned
       if (result && Array.isArray(result.scoreboard)) {
         appState.scoreboard = result.scoreboard;
       }
 
-      // Navigate to scoreboard to review
+      // Task 4.5: Trigger Quick Undo Banner
+      if (result && result.game) {
+        showQuickUndo(result.game.gameId, result.game.gameNumber);
+      }
+
       navigateTo('scoreboard');
     })
     .catch((err) => {
@@ -704,15 +726,137 @@ function submitGame() {
 }
 
 // ==========================================================================
-// 5. History Screen (Screen 3)
+// 5. History Screen (Screen 3) - Tasks 4.1 & 4.3
 // ==========================================================================
+function populateFilterSelects() {
+  const selectPlayer = document.getElementById('filter-player');
+  const selectLeader = document.getElementById('filter-leader');
+  if (!selectPlayer || !selectLeader) return;
+
+  const currentPVal = selectPlayer.value;
+  const currentLVal = selectLeader.value;
+
+  selectPlayer.innerHTML = '<option value="">-- Tất cả người chơi --</option>';
+  selectLeader.innerHTML = '<option value="">-- Tất cả người cầm đầu --</option>';
+
+  (appState.players || []).forEach((p) => {
+    const optP = document.createElement('option');
+    optP.value = p.playerId;
+    optP.textContent = `${p.name} (${p.playerId})`;
+    if (p.playerId === currentPVal) optP.selected = true;
+    selectPlayer.appendChild(optP);
+
+    const optL = document.createElement('option');
+    optL.value = p.playerId;
+    optL.textContent = `${p.name} (${p.playerId})`;
+    if (p.playerId === currentLVal) optL.selected = true;
+    selectLeader.appendChild(optL);
+  });
+}
+
+function toggleFilterPanel() {
+  const body = document.getElementById('filter-body');
+  const arrow = document.getElementById('filter-arrow-icon');
+  if (!body) return;
+
+  appState.historyFilters.isPanelOpen = !appState.historyFilters.isPanelOpen;
+  if (appState.historyFilters.isPanelOpen) {
+    body.classList.add('filter-body--open');
+    if (arrow) arrow.textContent = '▲';
+  } else {
+    body.classList.remove('filter-body--open');
+    if (arrow) arrow.textContent = '▼';
+  }
+}
+
+function applyHistoryFilters() {
+  const pSelect = document.getElementById('filter-player');
+  const lSelect = document.getElementById('filter-leader');
+  const rSelect = document.getElementById('filter-result');
+  const sSelect = document.getElementById('filter-status');
+  const fromInput = document.getElementById('filter-from-game');
+  const toInput = document.getElementById('filter-to-game');
+
+  appState.historyFilters.playerId = pSelect ? pSelect.value : '';
+  appState.historyFilters.leaderId = lSelect ? lSelect.value : '';
+  appState.historyFilters.result = rSelect ? rSelect.value : 'ALL';
+  appState.historyFilters.status = sSelect ? sSelect.value : 'HOP_LE';
+  appState.historyFilters.fromGameNumber = fromInput ? fromInput.value : '';
+  appState.historyFilters.toGameNumber = toInput ? toInput.value : '';
+
+  // Update active count badge
+  let activeCount = 0;
+  if (appState.historyFilters.playerId) activeCount++;
+  if (appState.historyFilters.leaderId) activeCount++;
+  if (appState.historyFilters.result !== 'ALL') activeCount++;
+  if (appState.historyFilters.status !== 'HOP_LE') activeCount++;
+  if (appState.historyFilters.fromGameNumber) activeCount++;
+  if (appState.historyFilters.toGameNumber) activeCount++;
+
+  const countBadge = document.getElementById('filter-active-count');
+  if (countBadge) {
+    if (activeCount > 0) {
+      countBadge.textContent = String(activeCount);
+      countBadge.style.display = 'inline-flex';
+    } else {
+      countBadge.style.display = 'none';
+    }
+  }
+
+  loadHistory();
+}
+
+function resetHistoryFilters() {
+  const pSelect = document.getElementById('filter-player');
+  const lSelect = document.getElementById('filter-leader');
+  const rSelect = document.getElementById('filter-result');
+  const sSelect = document.getElementById('filter-status');
+  const fromInput = document.getElementById('filter-from-game');
+  const toInput = document.getElementById('filter-to-game');
+
+  if (pSelect) pSelect.value = '';
+  if (lSelect) lSelect.value = '';
+  if (rSelect) rSelect.value = 'ALL';
+  if (sSelect) sSelect.value = 'HOP_LE';
+  if (fromInput) fromInput.value = '';
+  if (toInput) toInput.value = '';
+
+  appState.historyFilters.playerId = '';
+  appState.historyFilters.leaderId = '';
+  appState.historyFilters.result = 'ALL';
+  appState.historyFilters.status = 'HOP_LE';
+  appState.historyFilters.fromGameNumber = '';
+  appState.historyFilters.toGameNumber = '';
+
+  const countBadge = document.getElementById('filter-active-count');
+  if (countBadge) countBadge.style.display = 'none';
+
+  loadHistory();
+}
+
 function loadHistory() {
   appState.loading.history = true;
   renderHistoryView();
 
-  apiClient.call('getGameHistory', { includeCancelled: true, limit: 50 })
-    .then((data) => {
-      appState.history = Array.isArray(data) ? data : [];
+  const filterParams = {
+    playerId: appState.historyFilters.playerId || undefined,
+    leaderId: appState.historyFilters.leaderId || undefined,
+    result: appState.historyFilters.result || undefined,
+    status: appState.historyFilters.status || undefined,
+    fromGameNumber: appState.historyFilters.fromGameNumber ? parseInt(appState.historyFilters.fromGameNumber, 10) : undefined,
+    toGameNumber: appState.historyFilters.toGameNumber ? parseInt(appState.historyFilters.toGameNumber, 10) : undefined,
+    limit: 50
+  };
+
+  apiClient.call('getGameHistory', filterParams)
+    .then((res) => {
+      if (res && Array.isArray(res.items)) {
+        appState.history = res.items;
+      } else if (Array.isArray(res)) {
+        appState.history = res;
+      } else {
+        appState.history = [];
+      }
       appState.errors.history = null;
     })
     .catch((err) => {
@@ -755,9 +899,9 @@ function renderHistoryView() {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state__icon">📜</div>
-        <h3 class="empty-state__title">Chưa có ván đấu nào</h3>
-        <p style="font-size: 0.9rem; margin-bottom: 16px;">Lịch sử các ván đấu sẽ xuất hiện tại đây.</p>
-        <button class="btn-secondary" onclick="navigateTo('new-game')">Tạo ván đầu tiên</button>
+        <h3 class="empty-state__title">Không tìm thấy ván đấu phù hợp</h3>
+        <p style="font-size: 0.9rem; margin-bottom: 16px;">Thử thay đổi bộ lọc hoặc tạo ván đấu mới.</p>
+        <button class="btn-secondary" onclick="resetHistoryFilters()">Đặt lại bộ lọc</button>
       </div>
     `;
     return;
@@ -768,14 +912,29 @@ function renderHistoryView() {
 
   appState.history.forEach((round) => {
     const card = document.createElement('div');
-    const isCancelled = round.status === 'DA_HUY';
-    card.className = `history-card ${isCancelled ? 'history-card--cancelled' : ''}`;
+    const isCancelled = round.status === 'DA_HUY' || round.isCancelled;
+    const isEdited = round.status === 'DA_CHINH_SUA' || round.isEdited;
 
-    const dateStr = round.playedAt ? new Date(round.playedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '';
+    card.className = `history-card ${isCancelled ? 'history-card--cancelled' : ''} ${isEdited ? 'history-card--edited' : ''}`;
+    card.style.cursor = 'pointer';
+
+    const dateStr = round.playedAt ? new Date(round.playedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+
+    let statusBadgeHtml = '';
+    if (isCancelled) {
+      statusBadgeHtml = '<span class="badge badge--cancelled">ĐÃ HỦY</span>';
+    } else if (isEdited) {
+      statusBadgeHtml = '<span class="badge badge--edited">ĐÃ SỬA</span>';
+    } else {
+      statusBadgeHtml = '<span class="badge badge--active">HỢP LỆ</span>';
+    }
 
     card.innerHTML = `
       <div class="history-card__header">
-        <span class="history-card__num">Ván #${round.gameNumber || round.SO_VAN || ''} ${isCancelled ? '<span class="badge badge--inactive" style="color: var(--color-danger);">ĐÃ HỦY</span>' : ''}</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="history-card__num">Ván #${round.gameNumber || round.SO_VAN || ''}</span>
+          ${statusBadgeHtml}
+        </div>
         <span class="history-card__time">${dateStr}</span>
       </div>
       <div class="history-card__leader">
@@ -783,6 +942,7 @@ function renderHistoryView() {
         <span style="color: ${round.leaderDelta > 0 ? 'var(--color-success)' : round.leaderDelta < 0 ? 'var(--color-danger)' : 'var(--text-muted)'}; font-weight: 800; margin-left: 6px;">
           (${round.leaderDelta > 0 ? `+${round.leaderDelta}` : `${round.leaderDelta}`})
         </span>
+        <span style="font-size: 0.75rem; color: var(--text-muted); margin-left: 8px;">Tổng GD: ${round.transactionTotal || 0}đ</span>
       </div>
       <div class="history-card__details">
         ${Array.isArray(round.details) ? round.details.map((d) => `
@@ -793,6 +953,11 @@ function renderHistoryView() {
       </div>
     `;
 
+    // Click card opens full Game Detail modal (Task 4.2)
+    card.addEventListener('click', () => {
+      openGameDetailModal(round.gameId);
+    });
+
     listEl.appendChild(card);
   });
 
@@ -800,16 +965,461 @@ function renderHistoryView() {
 }
 
 // ==========================================================================
-// 6. Players Screen (Screen 4)
+// 6. Game Detail Modal (Task 4.2)
+// ==========================================================================
+function openGameDetailModal(gameId) {
+  const modal = document.getElementById('modal-game-detail');
+  const body = document.getElementById('modal-detail-body');
+  const footer = document.getElementById('modal-detail-footer');
+  const title = document.getElementById('modal-detail-title');
+  if (!modal || !body || !footer) return;
+
+  modal.classList.add('modal-backdrop--open');
+  body.innerHTML = `
+    <div class="loading-container">
+      <div class="spinner"></div>
+      <p>Đang tải chi tiết ván...</p>
+    </div>
+  `;
+  footer.innerHTML = '';
+
+  apiClient.call('getGameDetail', gameId)
+    .then((game) => {
+      if (!game) throw new Error('Không tìm thấy ván đấu');
+
+      if (title) title.textContent = `Chi Tiết Ván #${game.gameNumber}`;
+
+      const dateFormatted = game.playedAt ? new Date(game.playedAt).toLocaleString('vi-VN') : 'Không rõ';
+      const isCancelled = game.status === 'DA_HUY';
+      const isEdited = game.status === 'DA_CHINH_SUA';
+
+      body.innerHTML = `
+        <div class="detail-grid">
+          <div class="detail-box">
+            <div class="detail-box__label">Mã ván / Số ván</div>
+            <div class="detail-box__value">${escapeHtml(game.gameId)} (#${game.gameNumber})</div>
+          </div>
+          <div class="detail-box">
+            <div class="detail-box__label">Trạng thái</div>
+            <div class="detail-box__value">
+              ${isCancelled ? '<span class="badge badge--cancelled">ĐÃ HỦY</span>' : isEdited ? '<span class="badge badge--edited">ĐÃ CHỈNH SỬA</span>' : '<span class="badge badge--active">HỢP LỆ</span>'}
+            </div>
+          </div>
+          <div class="detail-box">
+            <div class="detail-box__label">Thời gian chốt</div>
+            <div class="detail-box__value" style="font-size: 0.85rem;">${dateFormatted}</div>
+          </div>
+          <div class="detail-box">
+            <div class="detail-box__label">Tổng giao dịch</div>
+            <div class="detail-box__value">${game.transactionTotal || 0} điểm</div>
+          </div>
+        </div>
+
+        ${game.note ? `
+          <div style="background-color: var(--bg-subtle); padding: 10px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 12px;">
+            <strong>Ghi chú:</strong> ${escapeHtml(game.note)}
+          </div>
+        ` : ''}
+
+        <h4 style="font-size: 0.95rem; font-weight: 700; margin: 12px 0 6px 0;">Danh sách người tham gia</h4>
+        <table class="participant-table">
+          <thead>
+            <tr>
+              <th>Người chơi</th>
+              <th>Vai trò</th>
+              <th>Kết quả</th>
+              <th>Cược</th>
+              <th>Biến động</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Array.isArray(game.participants) ? game.participants.map((p) => `
+              <tr>
+                <td><strong>${escapeHtml(p.name)}</strong></td>
+                <td><span class="badge ${p.role === 'LEADER' ? 'badge--leader' : ''}">${escapeHtml(p.roleLabel)}</span></td>
+                <td>
+                  <span class="history-tag history-tag--${(p.result || '').toLowerCase()}">
+                    ${p.result === 'WIN' ? 'Thắng' : p.result === 'LOSE' ? 'Thua' : 'Hòa'}
+                  </span>
+                </td>
+                <td>${p.bet}</td>
+                <td style="font-weight: 800; color: ${p.delta > 0 ? 'var(--color-success)' : p.delta < 0 ? 'var(--color-danger)' : 'var(--text-muted)'};">
+                  ${p.delta > 0 ? `+${p.delta}` : `${p.delta}`}
+                </td>
+              </tr>
+            `).join('') : ''}
+          </tbody>
+        </table>
+      `;
+
+      // Render Action Buttons based on permissions
+      footer.innerHTML = '';
+
+      if (game.canEdit && !isCancelled) {
+        const btnEdit = document.createElement('button');
+        btnEdit.type = 'button';
+        btnEdit.className = 'btn-secondary';
+        btnEdit.style.backgroundColor = 'var(--color-primary)';
+        btnEdit.innerHTML = '✏️ Sửa ván';
+        btnEdit.onclick = () => {
+          closeGameDetailModal();
+          openEditGameModal(game);
+        };
+        footer.appendChild(btnEdit);
+      }
+
+      if (game.canCancel && !isCancelled) {
+        const btnCancel = document.createElement('button');
+        btnCancel.type = 'button';
+        btnCancel.className = 'btn-secondary';
+        btnCancel.style.backgroundColor = 'var(--color-danger)';
+        btnCancel.innerHTML = '🗑️ Hủy ván';
+        btnCancel.onclick = () => {
+          confirmCancelGame(game.gameId);
+        };
+        footer.appendChild(btnCancel);
+      }
+
+      if (isCancelled) {
+        const btnRestore = document.createElement('button');
+        btnRestore.type = 'button';
+        btnRestore.className = 'btn-secondary';
+        btnRestore.style.backgroundColor = 'var(--color-success)';
+        btnRestore.innerHTML = '🔄 Khôi phục ván';
+        btnRestore.onclick = () => {
+          confirmRestoreGame(game.gameId);
+        };
+        footer.appendChild(btnRestore);
+      }
+
+      const btnClose = document.createElement('button');
+      btnClose.type = 'button';
+      btnClose.className = 'btn-secondary';
+      btnClose.style.backgroundColor = 'var(--bg-subtle)';
+      btnClose.style.color = 'var(--text-main)';
+      btnClose.textContent = 'Đóng';
+      btnClose.onclick = closeGameDetailModal;
+      footer.appendChild(btnClose);
+    })
+    .catch((err) => {
+      body.innerHTML = `
+        <div class="error-state">
+          <p>${escapeHtml(err.message)}</p>
+        </div>
+      `;
+      footer.innerHTML = `<button class="btn-secondary" onclick="closeGameDetailModal()">Đóng</button>`;
+    });
+}
+
+function closeGameDetailModal() {
+  const modal = document.getElementById('modal-game-detail');
+  if (modal) modal.classList.remove('modal-backdrop--open');
+}
+
+// ==========================================================================
+// 7. Edit Game Screen & Workflow (Task 4.4)
+// ==========================================================================
+function openEditGameModal(game) {
+  const modal = document.getElementById('modal-edit-game');
+  const body = document.getElementById('modal-edit-body');
+  const title = document.getElementById('modal-edit-title');
+  if (!modal || !body) return;
+
+  if (title) title.textContent = `Chỉnh Sửa Ván #${game.gameNumber}`;
+
+  // Populate appState.editingGame
+  appState.editingGame.gameId = game.gameId;
+  appState.editingGame.gameNumber = game.gameNumber;
+  appState.editingGame.leaderId = game.leaderId;
+  appState.editingGame.defaultBet = game.defaultBet || 5;
+  appState.editingGame.note = game.note || '';
+  appState.editingGame.customBets = {};
+  appState.editingGame.results = {};
+
+  if (Array.isArray(game.details)) {
+    game.details.forEach((d) => {
+      appState.editingGame.results[d.playerId] = d.result;
+      if (d.bet !== game.defaultBet) {
+        appState.editingGame.customBets[d.playerId] = d.bet;
+      }
+    });
+  }
+
+  renderEditGameBody();
+  modal.classList.add('modal-backdrop--open');
+}
+
+function renderEditGameBody() {
+  const body = document.getElementById('modal-edit-body');
+  if (!body) return;
+
+  const activePlayers = (appState.players || []).filter((p) => p.active);
+  const opponents = activePlayers.filter((p) => p.playerId !== appState.editingGame.leaderId);
+
+  body.innerHTML = `
+    <div style="background-color: var(--color-warning-bg); color: var(--color-warning-text); padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.85rem; margin-bottom: 14px;">
+      ⚠️ <strong>Lưu ý:</strong> Việc sửa ván đấu sẽ tự động tính lại toàn bộ điểm trên Bảng Tổng Kết.
+    </div>
+
+    <div class="filter-group" style="margin-bottom: 12px;">
+      <label class="filter-label">Người cầm đầu (A):</label>
+      <select id="edit-leader-select" class="filter-select" onchange="handleEditLeaderChange(this.value)">
+        ${activePlayers.map((p) => `
+          <option value="${p.playerId}" ${p.playerId === appState.editingGame.leaderId ? 'selected' : ''}>
+            ${escapeHtml(p.name)}
+          </option>
+        `).join('')}
+      </select>
+    </div>
+
+    <div class="filter-group" style="margin-bottom: 16px;">
+      <label class="filter-label">Mức cược mặc định của ván:</label>
+      <input type="number" id="edit-default-bet" class="filter-select" value="${appState.editingGame.defaultBet}" min="0" onchange="handleEditDefaultBetChange(this.value)">
+    </div>
+
+    <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 10px;">Kết quả đối đầu:</h4>
+    <div class="opponents-list">
+      ${opponents.map((opp) => {
+        const curRes = appState.editingGame.results[opp.playerId] || 'DRAW';
+        const curBet = appState.editingGame.customBets[opp.playerId] !== undefined ? appState.editingGame.customBets[opp.playerId] : appState.editingGame.defaultBet;
+        return `
+          <div class="opp-card">
+            <div class="opp-card__header">
+              <span class="opp-card__name">${escapeHtml(opp.name)}</span>
+              <span style="font-size: 0.85rem; font-weight: 700;">Cược: ${curBet}</span>
+            </div>
+            <div class="quick-buttons-group">
+              <button type="button" class="btn-result btn-result--win" aria-pressed="${curRes === 'WIN' ? 'true' : 'false'}" onclick="setEditOppResult('${opp.playerId}', 'WIN')">+ Thắng</button>
+              <button type="button" class="btn-result btn-result--draw" aria-pressed="${curRes === 'DRAW' ? 'true' : 'false'}" onclick="setEditOppResult('${opp.playerId}', 'DRAW')">0 Hòa</button>
+              <button type="button" class="btn-result btn-result--lose" aria-pressed="${curRes === 'LOSE' ? 'true' : 'false'}" onclick="setEditOppResult('${opp.playerId}', 'LOSE')">- Thua</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="filter-group" style="margin-top: 14px;">
+      <label class="filter-label">Ghi chú chỉnh sửa:</label>
+      <input type="text" id="edit-note" class="filter-select" placeholder="Lý do sửa..." value="${escapeHtml(appState.editingGame.note)}">
+    </div>
+  `;
+}
+
+function handleEditLeaderChange(newLeaderId) {
+  appState.editingGame.leaderId = newLeaderId;
+  renderEditGameBody();
+}
+
+function handleEditDefaultBetChange(val) {
+  const num = parseInt(val, 10);
+  if (!isNaN(num) && num >= 0) {
+    appState.editingGame.defaultBet = num;
+    renderEditGameBody();
+  }
+}
+
+function setEditOppResult(playerId, result) {
+  appState.editingGame.results[playerId] = result;
+  renderEditGameBody();
+}
+
+function closeEditGameModal() {
+  const modal = document.getElementById('modal-edit-game');
+  if (modal) modal.classList.remove('modal-backdrop--open');
+}
+
+function submitUpdateGame() {
+  const noteInput = document.getElementById('edit-note');
+  const reason = noteInput ? noteInput.value.trim() : '';
+
+  const activePlayers = (appState.players || []).filter((p) => p.active);
+  const opponents = activePlayers.filter((p) => p.playerId !== appState.editingGame.leaderId);
+
+  const opponentPayloads = opponents.map((opp) => ({
+    playerId: opp.playerId,
+    result: appState.editingGame.results[opp.playerId] || 'DRAW',
+    bet: appState.editingGame.customBets[opp.playerId] !== undefined ? appState.editingGame.customBets[opp.playerId] : appState.editingGame.defaultBet
+  }));
+
+  const payload = {
+    leaderId: appState.editingGame.leaderId,
+    defaultBet: appState.editingGame.defaultBet,
+    opponents: opponentPayloads,
+    note: reason,
+    reason: reason || 'Chỉnh sửa kết quả ván'
+  };
+
+  const btn = document.getElementById('btn-save-edit-game');
+  if (btn) btn.disabled = true;
+
+  apiClient.call('updateGame', appState.editingGame.gameId, payload)
+    .then((result) => {
+      showToast('Đã cập nhật ván đấu thành công!', 'success');
+      closeEditGameModal();
+      loadHistory();
+      loadScoreboard();
+    })
+    .catch((err) => {
+      showToast(`Lỗi sửa ván: ${err.message}`, 'error');
+    })
+    .finally(() => {
+      if (btn) btn.disabled = false;
+    });
+}
+
+// ==========================================================================
+// 8. Confirm Dialog Helper & Actions (Task 4.4)
+// ==========================================================================
+function openConfirmModal(title, message, onConfirmCallback) {
+  const modal = document.getElementById('modal-confirm');
+  const tEl = document.getElementById('confirm-modal-title');
+  const bEl = document.getElementById('confirm-modal-body');
+  const cBtn = document.getElementById('btn-confirm-action');
+  if (!modal || !bEl) return;
+
+  if (tEl) tEl.textContent = title;
+  bEl.textContent = message;
+
+  if (cBtn) {
+    cBtn.onclick = () => {
+      closeConfirmModal();
+      onConfirmCallback();
+    };
+  }
+
+  modal.classList.add('modal-backdrop--open');
+}
+
+function closeConfirmModal() {
+  const modal = document.getElementById('modal-confirm');
+  if (modal) modal.classList.remove('modal-backdrop--open');
+}
+
+function confirmCancelGame(gameId) {
+  openConfirmModal(
+    'Hủy ván đấu',
+    'Ván này sẽ được đánh dấu đã hủy và không còn được tính vào tổng điểm. Dữ liệu gốc vẫn được giữ lại.',
+    () => {
+      apiClient.call('cancelGame', gameId, 'Người dùng hủy từ chi tiết')
+        .then(() => {
+          showToast('Đã hủy ván đấu thành công', 'success');
+          closeGameDetailModal();
+          loadHistory();
+          loadScoreboard();
+        })
+        .catch((err) => {
+          showToast(`Lỗi hủy ván: ${err.message}`, 'error');
+        });
+    }
+  );
+}
+
+function confirmRestoreGame(gameId) {
+  openConfirmModal(
+    'Khôi phục ván đấu',
+    'Khôi phục ván sẽ đưa điểm của ván trở lại bảng tổng điểm. Bạn có chắc muốn tiếp tục?',
+    () => {
+      apiClient.call('restoreGame', gameId)
+        .then(() => {
+          showToast('Đã khôi phục ván đấu thành công', 'success');
+          closeGameDetailModal();
+          loadHistory();
+          loadScoreboard();
+        })
+        .catch((err) => {
+          showToast(`Lỗi khôi phục ván: ${err.message}`, 'error');
+        });
+    }
+  );
+}
+
+// ==========================================================================
+// 9. Quick Undo Banner (Task 4.5)
+// ==========================================================================
+function showQuickUndo(gameId, gameNumber) {
+  dismissQuickUndo(); // Clean up previous timer
+
+  appState.quickUndo.active = true;
+  appState.quickUndo.gameId = gameId;
+  appState.quickUndo.gameNumber = gameNumber;
+  appState.quickUndo.remainingSeconds = 8;
+
+  const banner = document.getElementById('quick-undo-banner');
+  const text = document.getElementById('quick-undo-text');
+  const countSpan = document.getElementById('quick-undo-countdown');
+  const progress = document.getElementById('quick-undo-progress');
+
+  if (text) text.textContent = `Đã chốt ván #${gameNumber}`;
+  if (countSpan) countSpan.textContent = '8';
+  if (progress) {
+    progress.style.transition = 'none';
+    progress.style.width = '100%';
+    setTimeout(() => {
+      progress.style.transition = 'width 8s linear';
+      progress.style.width = '0%';
+    }, 50);
+  }
+
+  if (banner) banner.classList.add('quick-undo-banner--visible');
+
+  // Countdown interval
+  appState.quickUndo.intervalId = setInterval(() => {
+    appState.quickUndo.remainingSeconds -= 1;
+    if (countSpan) countSpan.textContent = String(appState.quickUndo.remainingSeconds);
+    if (appState.quickUndo.remainingSeconds <= 0) {
+      dismissQuickUndo();
+    }
+  }, 1000);
+
+  // Auto dismiss timeout
+  appState.quickUndo.timerId = setTimeout(() => {
+    dismissQuickUndo();
+  }, 8000);
+}
+
+function dismissQuickUndo() {
+  if (appState.quickUndo.timerId) clearTimeout(appState.quickUndo.timerId);
+  if (appState.quickUndo.intervalId) clearInterval(appState.quickUndo.intervalId);
+
+  appState.quickUndo.active = false;
+  appState.quickUndo.timerId = null;
+  appState.quickUndo.intervalId = null;
+
+  const banner = document.getElementById('quick-undo-banner');
+  if (banner) banner.classList.remove('quick-undo-banner--visible');
+}
+
+function triggerQuickUndo() {
+  if (!appState.quickUndo.active || !appState.quickUndo.gameId) return;
+
+  const targetGameId = appState.quickUndo.gameId;
+  dismissQuickUndo();
+
+  showToast('Đang hoàn tác ván đấu...', 'info');
+
+  apiClient.call('undoGame', targetGameId)
+    .then(() => {
+      showToast('Đã hoàn tác ván đấu thành công!', 'success');
+      loadScoreboard();
+      loadHistory();
+    })
+    .catch((err) => {
+      showToast(`Lỗi hoàn tác: ${err.message}`, 'error');
+    });
+}
+
+// ==========================================================================
+// 10. Players & Settings Screens
 // ==========================================================================
 function loadPlayers() {
   appState.loading.players = true;
   renderPlayersView();
 
-  apiClient.call('getPlayers', true) // Include inactive
+  apiClient.call('getPlayers', true)
     .then((data) => {
       appState.players = Array.isArray(data) ? data : [];
       appState.errors.players = null;
+      populateFilterSelects();
     })
     .catch((err) => {
       console.error('Error loading players:', err);
@@ -826,7 +1436,6 @@ function renderPlayersView() {
   if (!container) return;
   container.innerHTML = '';
 
-  // Add Player Form
   const formCard = document.createElement('div');
   formCard.className = 'card';
   formCard.innerHTML = `
@@ -838,17 +1447,12 @@ function renderPlayersView() {
   `;
   container.appendChild(formCard);
 
-  // Player List
   const listCard = document.createElement('div');
   listCard.className = 'card';
   listCard.innerHTML = '<h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 12px;">Danh sách người chơi</h3>';
 
   if (appState.loading.players) {
-    listCard.innerHTML += `
-      <div class="loading-container" style="padding: 20px 0;">
-        <div class="spinner"></div>
-      </div>
-    `;
+    listCard.innerHTML += `<div class="loading-container"><div class="spinner"></div></div>`;
   } else if (!appState.players || appState.players.length === 0) {
     listCard.innerHTML += '<p class="empty-state">Chưa có người chơi nào.</p>';
   } else {
@@ -891,7 +1495,7 @@ function handleAddPlayer() {
   if (btn) btn.disabled = true;
 
   apiClient.call('addPlayer', name)
-    .then((newPlayer) => {
+    .then(() => {
       showToast(`Đã thêm người chơi '${name}'!`, 'success');
       input.value = '';
       loadPlayers();
@@ -906,24 +1510,23 @@ function handleAddPlayer() {
 }
 
 function handleDeactivatePlayer(playerId) {
-  if (!confirm('Bạn có chắc chắn muốn đánh dấu người chơi này nghỉ chơi? (Lịch sử điểm số vẫn được giữ nguyên)')) {
-    return;
-  }
-
-  apiClient.call('deactivatePlayer', playerId)
-    .then(() => {
-      showToast('Đã cập nhật trạng thái người chơi', 'success');
-      loadPlayers();
-      loadScoreboard();
-    })
-    .catch((err) => {
-      showToast(err.message, 'error');
-    });
+  openConfirmModal(
+    'Nghỉ chơi',
+    'Bạn có chắc muốn đánh dấu người chơi này nghỉ chơi? (Lịch sử điểm số vẫn được giữ nguyên)',
+    () => {
+      apiClient.call('deactivatePlayer', playerId)
+        .then(() => {
+          showToast('Đã cập nhật trạng thái người chơi', 'success');
+          loadPlayers();
+          loadScoreboard();
+        })
+        .catch((err) => {
+          showToast(err.message, 'error');
+        });
+    }
+  );
 }
 
-// ==========================================================================
-// 7. Settings Screen (Screen 5)
-// ==========================================================================
 function renderSettingsView() {
   const container = document.getElementById('settings-container');
   if (!container) return;
@@ -984,7 +1587,7 @@ function handleRebuildSummary() {
 }
 
 // ==========================================================================
-// 8. Toast Notification System (aria-live)
+// 11. Toast Notifications & Utilities
 // ==========================================================================
 function showToast(message, type = 'info', duration = 3000) {
   const container = document.getElementById('toast-container');
@@ -1007,7 +1610,6 @@ function showToast(message, type = 'info', duration = 3000) {
   }, duration);
 }
 
-// Utility: HTML Escaping
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -1019,10 +1621,9 @@ function escapeHtml(str) {
 }
 
 // ==========================================================================
-// 9. Application Bootstrap & Initialization
+// 12. Application Bootstrap
 // ==========================================================================
 function initApp() {
-  // Bind Bottom Navigation
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
@@ -1030,7 +1631,6 @@ function initApp() {
     });
   });
 
-  // Bind Header Refresh
   const btnRefresh = document.getElementById('btn-refresh');
   if (btnRefresh) {
     btnRefresh.addEventListener('click', () => {
@@ -1039,7 +1639,6 @@ function initApp() {
     });
   }
 
-  // Load initial backend session status and data
   loadInitialData();
 }
 
@@ -1060,6 +1659,7 @@ function loadInitialData() {
 
     if (playersRes.status === 'fulfilled' && Array.isArray(playersRes.value)) {
       appState.players = playersRes.value;
+      populateFilterSelects();
     }
 
     if (scoreRes.status === 'fulfilled' && Array.isArray(scoreRes.value)) {
@@ -1071,6 +1671,5 @@ function loadInitialData() {
   });
 }
 
-// Start application when DOM is ready
 document.addEventListener('DOMContentLoaded', initApp);
 </script>
