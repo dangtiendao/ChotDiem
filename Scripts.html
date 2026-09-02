@@ -37,6 +37,7 @@ const appState = {
     leaderId: null,
     defaultBet: 5,
     customBets: {}, // { [playerId]: number }
+    multipliers: {}, // { [playerId]: 1 | 2 | 3 | 4 }
     results: {},    // { [playerId]: 'WIN' | 'DRAW' | 'LOSE' }
     note: '',
     editingBet: false,
@@ -48,6 +49,7 @@ const appState = {
     leaderId: null,
     defaultBet: 5,
     customBets: {},
+    multipliers: {},
     results: {},
     note: ''
   },
@@ -219,11 +221,19 @@ async function handleManualRefresh() {
  */
 async function refreshAppData(showSuccessToast = false) {
   const btnRefresh = document.getElementById('btn-refresh');
+  const syncProgressBar = document.getElementById('sync-progress-bar');
+  const syncTimeLabel = document.getElementById('sync-time-label');
+
   if (appState.loading.refreshing) return;
 
   try {
     appState.loading.refreshing = true;
     if (btnRefresh) btnRefresh.classList.add('is-spinning');
+    if (syncProgressBar) syncProgressBar.classList.add('sync-progress-bar--active');
+    if (syncTimeLabel) {
+      syncTimeLabel.textContent = '⏳ Đang đồng bộ...';
+      syncTimeLabel.classList.add('is-syncing');
+    }
 
     const data = await GasClient.call('getAppBootstrapData');
 
@@ -263,8 +273,11 @@ async function refreshAppData(showSuccessToast = false) {
     showToast(`Không thể đồng bộ: ${err.message}`, 'danger');
   } finally {
     appState.loading.refreshing = false;
+    if (syncProgressBar) syncProgressBar.classList.remove('sync-progress-bar--active');
+    if (syncTimeLabel) syncTimeLabel.classList.remove('is-syncing');
+    updateSyncTimeLabel();
     if (btnRefresh) {
-      setTimeout(() => btnRefresh.classList.remove('is-spinning'), 400);
+      setTimeout(() => btnRefresh.classList.remove('is-spinning'), 500);
     }
   }
 }
@@ -399,7 +412,7 @@ function renderScoreboard() {
       scoreClass = 'score-lose';
     }
 
-    const leaderBadge = p.leaderCount > 0 ? `<span class="player-role-badge">A x${p.leaderCount}</span>` : '';
+    const leaderBadge = p.leaderCount > 0 ? `<span class="player-role-badge">Chương x${p.leaderCount}</span>` : '';
     const inactiveTag = !p.active ? `<span class="badge-status badge-status--cancelled" style="margin-left: 4px;">Nghỉ</span>` : '';
 
     html += `
@@ -458,7 +471,7 @@ function renderNewGameStep1Leader() {
     html += `
       <button type="button" class="leader-chip ${isSelected ? 'leader-chip--selected' : ''}" onclick="selectLeader('${p.playerId}')">
         <span>${escapeHtml(p.name)}</span>
-        ${isSelected ? '<span class="leader-chip__badge">Cầm đầu A</span>' : ''}
+        ${isSelected ? '<span class="leader-chip__badge">Cầm chương</span>' : ''}
       </button>
     `;
   });
@@ -485,14 +498,23 @@ function renderNewGameStep2Bet() {
   const bet = appState.newGame.defaultBet || 5;
 
   container.innerHTML = `
-    <div class="bet-bar">
-      <span class="bet-bar__label">Cược mặc định:</span>
-      <div class="bet-quick-group">
-        <button type="button" class="btn-bet-chip ${bet === 5 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(5)">5</button>
-        <button type="button" class="btn-bet-chip ${bet === 10 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(10)">10</button>
-        <button type="button" class="btn-bet-chip ${bet === 20 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(20)">20</button>
+    <div class="bet-container">
+      <div class="bet-header">
+        <span class="bet-label">Mức cược chung:</span>
+        <span class="bet-current-badge">${bet} điểm</span>
       </div>
-      <input type="number" id="input-round-default-bet" class="bet-input" value="${bet}" min="0" onchange="setDefaultBet(Number(this.value))">
+      <div class="bet-controls">
+        <div class="bet-quick-chips">
+          <button type="button" class="btn-bet-chip ${bet === 5 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(5)">5</button>
+          <button type="button" class="btn-bet-chip ${bet === 10 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(10)">10</button>
+          <button type="button" class="btn-bet-chip ${bet === 20 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(20)">20</button>
+          <button type="button" class="btn-bet-chip ${bet === 50 ? 'btn-bet-chip--active' : ''}" onclick="setDefaultBet(50)">50</button>
+        </div>
+        <div class="bet-custom-input-group">
+          <span class="bet-custom-label">Khác:</span>
+          <input type="number" id="input-round-default-bet" class="bet-input" value="${bet}" min="0" max="9999" onchange="setDefaultBet(Number(this.value))" placeholder="Số">
+        </div>
+      </div>
     </div>
   `;
 }
@@ -511,7 +533,7 @@ function renderNewGameStep3Opponents() {
   if (!appState.newGame.leaderId) {
     container.innerHTML = `
       <div style="font-size: 0.85rem; color: var(--text-muted); padding: 12px 0; text-align: center;">
-        👆 Vui lòng chọn <b>Người Cầm Đầu (A)</b> ở Bước 1 trước.
+        👆 Vui lòng chọn <b>Người cầm chương</b> ở Bước 1 trước.
       </div>
     `;
     return;
@@ -534,7 +556,9 @@ function renderNewGameStep3Opponents() {
   activeOpponents.forEach((p) => {
     const currentResult = appState.newGame.results[p.playerId] || 'DRAW';
     const hasCustomBet = appState.newGame.customBets[p.playerId] !== undefined;
-    const effectiveBet = hasCustomBet ? appState.newGame.customBets[p.playerId] : appState.newGame.defaultBet;
+    const baseBet = hasCustomBet ? appState.newGame.customBets[p.playerId] : appState.newGame.defaultBet;
+    const multiplier = appState.newGame.multipliers[p.playerId] || 1;
+    const effectiveBet = baseBet * multiplier;
 
     let delta = 0;
     if (currentResult === 'WIN') delta = effectiveBet;
@@ -549,37 +573,56 @@ function renderNewGameStep3Opponents() {
       deltaClass = 'score-lose';
     }
 
-    html += `
-      <div class="opponent-row">
-        <div class="opponent-row__name-col">
-          <div class="opponent-row__name">${escapeHtml(p.name)}</div>
-          <div class="opponent-row__bet-label" onclick="promptCustomBet('${p.playerId}', '${escapeHtml(p.name)}')">
-            Cược: <b>${effectiveBet}</b> ${hasCustomBet ? '<span style="color: var(--color-primary); font-size: 0.7rem;">(Riêng)</span>' : ''} ✏️
-          </div>
-        </div>
+    let cardStateClass = '';
+    if (currentResult === 'WIN') cardStateClass = 'opponent-card--win';
+    else if (currentResult === 'LOSE') cardStateClass = 'opponent-card--lose';
+    else cardStateClass = 'opponent-card--draw';
 
-        <div class="opponent-row__action-col">
-          <div class="btn-result-group" role="group" aria-label="Kết quả đối đầu của ${escapeHtml(p.name)}">
-            <button type="button" class="btn-result btn-result--win ${currentResult === 'WIN' ? 'btn-result--active' : ''}" 
-                    aria-label="Thắng (+${effectiveBet})" onclick="setOpponentResult('${p.playerId}', 'WIN')">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>+ Thắng</span>
-            </button>
-            <button type="button" class="btn-result btn-result--draw ${currentResult === 'DRAW' ? 'btn-result--active' : ''}" 
-                    aria-label="Hòa (0)" onclick="setOpponentResult('${p.playerId}', 'DRAW')">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-              <span>0 Hòa</span>
-            </button>
-            <button type="button" class="btn-result btn-result--lose ${currentResult === 'LOSE' ? 'btn-result--active' : ''}" 
-                    aria-label="Thua (-${effectiveBet})" onclick="setOpponentResult('${p.playerId}', 'LOSE')">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              <span>- Thua</span>
-            </button>
+    html += `
+      <div class="opponent-card ${cardStateClass}">
+        <div class="opponent-card__header">
+          <div class="opponent-card__player-info">
+            <span class="opponent-card__name">${escapeHtml(p.name)}</span>
+            <span class="opponent-card__bet-badge" onclick="promptCustomBet('${p.playerId}', '${escapeHtml(p.name)}')" title="Nhấn để đổi mức cược riêng">
+              <span>Cược: <b>${baseBet}</b></span>
+              ${hasCustomBet ? '<span class="badge-custom">Riêng</span>' : ''}
+              <span>✏️</span>
+            </span>
           </div>
-          <div class="opponent-row__delta ${deltaClass}">
+          <div class="opponent-card__delta ${deltaClass}">
             ${deltaPrefix}${delta}
           </div>
         </div>
+
+        <div class="btn-result-group" role="group" aria-label="Kết quả đối đầu của ${escapeHtml(p.name)}">
+          <button type="button" class="btn-result btn-result--win ${currentResult === 'WIN' ? 'btn-result--active' : ''}" 
+                  aria-label="Thắng (+${effectiveBet})" onclick="setOpponentResult('${p.playerId}', 'WIN')">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>+ Thắng</span>
+          </button>
+          <button type="button" class="btn-result btn-result--draw ${currentResult === 'DRAW' ? 'btn-result--active' : ''}" 
+                  aria-label="Hòa (0)" onclick="setOpponentResult('${p.playerId}', 'DRAW')">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+            <span>0 Hòa</span>
+          </button>
+          <button type="button" class="btn-result btn-result--lose ${currentResult === 'LOSE' ? 'btn-result--active' : ''}" 
+                  aria-label="Thua (-${effectiveBet})" onclick="setOpponentResult('${p.playerId}', 'LOSE')">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            <span>- Thua</span>
+          </button>
+        </div>
+
+        ${currentResult !== 'DRAW' ? `
+          <div class="opponent-multiplier-bar">
+            <span class="multiplier-label">Hệ số nhân:</span>
+            <div class="multiplier-chips">
+              <button type="button" class="btn-multiplier-chip ${multiplier === 1 ? 'btn-multiplier-chip--active' : ''}" onclick="setOpponentMultiplier('${p.playerId}', 1)">x1</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 2 ? 'btn-multiplier-chip--active' : ''}" onclick="setOpponentMultiplier('${p.playerId}', 2)">x2</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 3 ? 'btn-multiplier-chip--active' : ''}" onclick="setOpponentMultiplier('${p.playerId}', 3)">x3</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 4 ? 'btn-multiplier-chip--active' : ''}" onclick="setOpponentMultiplier('${p.playerId}', 4)">x4</button>
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   });
@@ -589,6 +632,13 @@ function renderNewGameStep3Opponents() {
 
 function setOpponentResult(playerId, result) {
   appState.newGame.results[playerId] = result;
+  renderNewGameStep3Opponents();
+  renderNewGameStep5Preview();
+}
+
+function setOpponentMultiplier(playerId, mult) {
+  const m = Math.max(1, parseInt(mult, 10) || 1);
+  appState.newGame.multipliers[playerId] = m;
   renderNewGameStep3Opponents();
   renderNewGameStep5Preview();
 }
@@ -627,7 +677,7 @@ function renderNewGameStep5Preview() {
   }
 
   const leader = (appState.players || []).find((p) => p.playerId === appState.newGame.leaderId);
-  const leaderName = leader ? leader.name : 'Người cầm đầu';
+  const leaderName = leader ? leader.name : 'Người cầm chương';
 
   const activeOpponents = (appState.players || []).filter(
     (p) => p.active !== false && p.playerId !== appState.newGame.leaderId
@@ -638,9 +688,11 @@ function renderNewGameStep5Preview() {
 
   activeOpponents.forEach((opp) => {
     const res = appState.newGame.results[opp.playerId] || 'DRAW';
-    const effectiveBet = appState.newGame.customBets[opp.playerId] !== undefined
+    const baseBet = appState.newGame.customBets[opp.playerId] !== undefined
       ? appState.newGame.customBets[opp.playerId]
       : appState.newGame.defaultBet;
+    const multiplier = appState.newGame.multipliers[opp.playerId] || 1;
+    const effectiveBet = baseBet * multiplier;
 
     let delta = 0;
     if (res === 'WIN') delta = effectiveBet;
@@ -665,7 +717,7 @@ function renderNewGameStep5Preview() {
     <div class="card" style="background-color: var(--bg-subtle); border-left: 4px solid var(--color-primary);">
       <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 6px;">5. Điểm Dự Kiến Ván Này</div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <span style="font-size: 0.9rem;">Điểm ${escapeHtml(leaderName)} (A):</span>
+        <span style="font-size: 0.9rem;">Điểm ${escapeHtml(leaderName)} (Cầm chương):</span>
         <span class="${leaderDeltaClass}" style="font-size: 1.1rem; font-weight: 800;">${leaderPrefix}${leaderDelta}</span>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted);">
@@ -684,7 +736,7 @@ async function submitGame() {
 
   const leaderId = appState.newGame.leaderId;
   if (!leaderId) {
-    showToast('Vui lòng chọn Người Cầm Đầu (A) ở Bước 1.', 'warning');
+    showToast('Vui lòng chọn Người cầm chương ở Bước 1.', 'warning');
     return;
   }
 
@@ -699,14 +751,16 @@ async function submitGame() {
 
   const opponentsPayload = activeOpponents.map((opp) => {
     const res = appState.newGame.results[opp.playerId] || 'DRAW';
-    const bet = appState.newGame.customBets[opp.playerId] !== undefined
+    const baseBet = appState.newGame.customBets[opp.playerId] !== undefined
       ? appState.newGame.customBets[opp.playerId]
       : appState.newGame.defaultBet;
+    const multiplier = appState.newGame.multipliers[opp.playerId] || 1;
+    const effectiveBet = baseBet * multiplier;
 
     return {
       playerId: opp.playerId,
       result: res,
-      bet: bet
+      bet: effectiveBet
     };
   });
 
@@ -748,6 +802,7 @@ async function submitGame() {
       // Reset new game inputs
       appState.newGame.results = {};
       appState.newGame.customBets = {};
+      appState.newGame.multipliers = {};
       appState.newGame.note = '';
 
       renderNewGameStep3Opponents();
@@ -916,7 +971,7 @@ function populateHistoryFilterOptions() {
 
   if (selLeader) {
     const current = selLeader.value;
-    let html = '<option value="">-- Tất cả A --</option>';
+    let html = '<option value="">-- Tất cả người cầm chương --</option>';
     (appState.players || []).forEach((p) => {
       html += `<option value="${p.playerId}">${escapeHtml(p.name)}</option>`;
     });
@@ -1027,7 +1082,7 @@ function renderHistoryList(items) {
         </div>
         <div class="history-card__body">
           <div class="history-card__leader">
-            <span>👑 A: <b>${escapeHtml(g.leaderName)}</b></span>
+            <span>👑 Chương: <b>${escapeHtml(g.leaderName)}</b></span>
             <span class="${leaderClass}" style="font-weight: 800;">${leaderPrefix}${g.leaderDelta}</span>
           </div>
           <div class="history-card__opponents">
@@ -1321,12 +1376,14 @@ async function openEditGameModal(gameId) {
     appState.editingGame.note = res.note || '';
     appState.editingGame.results = {};
     appState.editingGame.customBets = {};
+    appState.editingGame.multipliers = {};
 
     (res.details || []).forEach((opp) => {
       appState.editingGame.results[opp.playerId] = opp.result;
       if (opp.bet !== res.defaultBet) {
         appState.editingGame.customBets[opp.playerId] = opp.bet;
       }
+      appState.editingGame.multipliers[opp.playerId] = 1;
     });
 
     renderEditGameForm();
@@ -1353,28 +1410,46 @@ function renderEditGameForm() {
   let oppRows = '';
   opponents.forEach((opp) => {
     const currentRes = eg.results[opp.playerId] || 'DRAW';
-    const effectiveBet = eg.customBets[opp.playerId] !== undefined ? eg.customBets[opp.playerId] : eg.defaultBet;
+    const baseBet = eg.customBets[opp.playerId] !== undefined ? eg.customBets[opp.playerId] : eg.defaultBet;
+    const multiplier = (eg.multipliers && eg.multipliers[opp.playerId]) || 1;
+    const effectiveBet = baseBet * multiplier;
+
+    let cardStateClass = '';
+    if (currentRes === 'WIN') cardStateClass = 'opponent-card--win';
+    else if (currentRes === 'LOSE') cardStateClass = 'opponent-card--lose';
+    else cardStateClass = 'opponent-card--draw';
 
     oppRows += `
-      <div class="opponent-row" style="padding: 8px 0; border-bottom: 1px solid var(--border-light);">
-        <div class="opponent-row__name-col">
-          <div class="opponent-row__name">${escapeHtml(opp.name)}</div>
-          <div style="font-size: 0.75rem; color: var(--text-muted);">Cược: ${effectiveBet}</div>
-        </div>
-        <div class="opponent-row__action-col">
-          <div class="btn-result-group">
-            <button type="button" class="btn-result btn-result--win ${currentRes === 'WIN' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'WIN')">+ Thắng</button>
-            <button type="button" class="btn-result btn-result--draw ${currentRes === 'DRAW' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'DRAW')">0 Hòa</button>
-            <button type="button" class="btn-result btn-result--lose ${currentRes === 'LOSE' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'LOSE')">- Thua</button>
+      <div class="opponent-card ${cardStateClass}" style="margin-bottom: 8px;">
+        <div class="opponent-card__header">
+          <div class="opponent-card__player-info">
+            <span class="opponent-card__name">${escapeHtml(opp.name)}</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted); background: var(--bg-subtle); padding: 2px 8px; border-radius: var(--radius-pill);">Cược: <b>${effectiveBet}</b></span>
           </div>
         </div>
+        <div class="btn-result-group">
+          <button type="button" class="btn-result btn-result--win ${currentRes === 'WIN' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'WIN')">+ Thắng</button>
+          <button type="button" class="btn-result btn-result--draw ${currentRes === 'DRAW' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'DRAW')">0 Hòa</button>
+          <button type="button" class="btn-result btn-result--lose ${currentRes === 'LOSE' ? 'btn-result--active' : ''}" onclick="setEditOpponentResult('${opp.playerId}', 'LOSE')">- Thua</button>
+        </div>
+        ${currentRes !== 'DRAW' ? `
+          <div class="opponent-multiplier-bar">
+            <span class="multiplier-label">Hệ số:</span>
+            <div class="multiplier-chips">
+              <button type="button" class="btn-multiplier-chip ${multiplier === 1 ? 'btn-multiplier-chip--active' : ''}" onclick="setEditOpponentMultiplier('${opp.playerId}', 1)">x1</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 2 ? 'btn-multiplier-chip--active' : ''}" onclick="setEditOpponentMultiplier('${opp.playerId}', 2)">x2</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 3 ? 'btn-multiplier-chip--active' : ''}" onclick="setEditOpponentMultiplier('${opp.playerId}', 3)">x3</button>
+              <button type="button" class="btn-multiplier-chip ${multiplier === 4 ? 'btn-multiplier-chip--active' : ''}" onclick="setEditOpponentMultiplier('${opp.playerId}', 4)">x4</button>
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   });
 
   body.innerHTML = `
     <div style="margin-bottom: 14px;">
-      <label class="filter-label">Người Cầm Đầu (A):</label>
+      <label class="filter-label">Người Cầm Chương:</label>
       <select class="filter-select" onchange="changeEditLeader(this.value)">
         ${leaderOptions}
       </select>
@@ -1401,10 +1476,17 @@ function setEditOpponentResult(playerId, result) {
   renderEditGameForm();
 }
 
+function setEditOpponentMultiplier(playerId, mult) {
+  if (!appState.editingGame.multipliers) appState.editingGame.multipliers = {};
+  appState.editingGame.multipliers[playerId] = Math.max(1, parseInt(mult, 10) || 1);
+  renderEditGameForm();
+}
+
 function changeEditLeader(newLeaderId) {
   appState.editingGame.leaderId = newLeaderId;
   delete appState.editingGame.results[newLeaderId];
   delete appState.editingGame.customBets[newLeaderId];
+  if (appState.editingGame.multipliers) delete appState.editingGame.multipliers[newLeaderId];
   renderEditGameForm();
 }
 
@@ -1428,11 +1510,13 @@ async function submitUpdateGame() {
 
   const opponentsPayload = activeOpponents.map((opp) => {
     const res = eg.results[opp.playerId] || 'DRAW';
-    const bet = eg.customBets[opp.playerId] !== undefined ? eg.customBets[opp.playerId] : eg.defaultBet;
+    const baseBet = eg.customBets[opp.playerId] !== undefined ? eg.customBets[opp.playerId] : eg.defaultBet;
+    const multiplier = (eg.multipliers && eg.multipliers[opp.playerId]) || 1;
+    const effectiveBet = baseBet * multiplier;
     return {
       playerId: opp.playerId,
       result: res,
-      bet: bet
+      bet: effectiveBet
     };
   });
 
@@ -1524,8 +1608,34 @@ async function handleAddPlayer(e) {
 
   try {
     showToast(`Đang thêm '${name}'...`, 'info');
-    const created = await GasClient.call('addPlayer', name);
     input.value = '';
+
+    const created = await GasClient.call('addPlayer', name);
+
+    // Optimistically update if created player returned
+    if (created && created.playerId) {
+      if (!appState.players.some((p) => p.playerId === created.playerId)) {
+        appState.players.push(created);
+      }
+      if (!appState.scoreboard.some((s) => s.playerId === created.playerId)) {
+        appState.scoreboard.push({
+          rank: appState.scoreboard.length + 1,
+          playerId: created.playerId,
+          name: created.name,
+          totalScore: 0,
+          winCount: 0,
+          loseCount: 0,
+          drawCount: 0,
+          gamesPlayed: 0,
+          leaderCount: 0,
+          active: true
+        });
+      }
+      renderPlayersList();
+      renderNewGameStep1Leader();
+      renderScoreboard();
+      populateHistoryFilterOptions();
+    }
 
     await refreshAppData(false);
     showToast(`Đã thêm người chơi '${name}' thành công!`, 'success');
@@ -1541,6 +1651,18 @@ async function promptRenamePlayer(playerId, currentName) {
 
   try {
     showToast(`Đang cập nhật...`, 'info');
+    
+    // Optimistically update UI
+    const p = appState.players.find((item) => item.playerId === playerId);
+    if (p) p.name = newName.trim();
+    const s = appState.scoreboard.find((item) => item.playerId === playerId);
+    if (s) s.name = newName.trim();
+    
+    renderPlayersList();
+    renderNewGameStep1Leader();
+    renderScoreboard();
+    populateHistoryFilterOptions();
+
     await GasClient.call('updatePlayer', playerId, { name: newName.trim() });
     await refreshAppData(false);
     showToast(`Đã đổi tên thành '${newName.trim()}'.`, 'success');
@@ -1557,6 +1679,16 @@ function handleDeactivatePlayer(playerId, name) {
     async () => {
       try {
         showToast(`Đang cập nhật trạng thái...`, 'info');
+        
+        // Optimistically update UI
+        const p = appState.players.find((item) => item.playerId === playerId);
+        if (p) p.active = false;
+        
+        renderPlayersList();
+        renderNewGameStep1Leader();
+        renderScoreboard();
+        populateHistoryFilterOptions();
+
         await GasClient.call('deactivatePlayer', playerId);
         await refreshAppData(false);
         showToast(`Người chơi '${name}' đã chuyển sang trạng thái nghỉ chơi.`, 'success');
@@ -1627,14 +1759,92 @@ function formatGameTime(isoString) {
 
 async function rebuildScoreboardManual() {
   showConfirmDialog(
-    'Tính lại toàn bộ bảng điểm',
-    'Hệ thống sẽ quét lại toàn bộ các ván đấu hợp lệ và tính lại bảng điểm từ đầu. Bạn có chắc chắn muốn thực hiện?',
+    'Tính lại bảng điểm từ lịch sử ván',
+    'Hệ thống sẽ quét lại toàn bộ các ván đấu hợp lệ và tính toán lại bảng tổng kết từ đầu.<br><br>Bạn có muốn thực hiện không?',
     async () => {
       try {
         showToast('Đang tính lại bảng điểm...', 'info');
+        await GasClient.call('rebuildSummarySheet');
         await refreshAppData(false);
+        renderScoreboard();
         showToast('Đã tính lại bảng điểm thành công!', 'success');
       } catch (err) {
+        console.error('[rebuildScoreboardManual] Error:', err);
+        showToast(`Lỗi: ${err.message}`, 'danger');
+      }
+    }
+  );
+}
+
+function handleResetScoreboard() {
+  showConfirmDialog(
+    '⚠️ Đặt lại điểm số (Giữ người chơi)',
+    'Toàn bộ điểm số và các ván đấu sẽ được đặt lại về <b>0</b>.<br><span style="font-size: 0.85rem; color: var(--text-muted);">Danh sách người chơi vẫn được giữ nguyên.</span><br><br>Bạn có chắc chắn muốn đặt lại không?',
+    async () => {
+      try {
+        showToast('Đang đặt lại bảng điểm...', 'info');
+        await GasClient.call('resetSessionData');
+        
+        // Optimistically clear local state
+        appState.recentGames = [];
+        appState.history = [];
+        appState.latestGameNumber = 0;
+        (appState.scoreboard || []).forEach((s) => {
+          s.totalScore = 0;
+          s.winCount = 0;
+          s.loseCount = 0;
+          s.drawCount = 0;
+          s.gamesPlayed = 0;
+          s.leaderCount = 0;
+        });
+
+        renderScoreboard();
+        renderHistoryList([]);
+        populateHistoryFilterOptions();
+        await refreshAppData(false);
+        showToast('Đã đặt lại bảng điểm về 0 cho phiên mới!', 'success');
+        navigateTo('scoreboard');
+      } catch (err) {
+        console.error('[handleResetScoreboard] Error:', err);
+        showToast(`Lỗi: ${err.message}`, 'danger');
+      }
+    }
+  );
+}
+
+function handleResetAllData() {
+  showConfirmDialog(
+    '🚨 Xóa trắng toàn bộ dữ liệu',
+    '<span style="color: var(--color-danger); font-weight: 700;">Hành động này không thể hoàn tác!</span><br><br>Toàn bộ <b>danh sách người chơi</b>, <b>bảng điểm</b> và <b>lịch sử ván đấu</b> sẽ bị xóa sạch hoàn toàn về trạng thái ban đầu.<br><br>Bạn có chắc chắn muốn xóa không?',
+    async () => {
+      try {
+        showToast('Đang xóa toàn bộ dữ liệu...', 'info');
+        await GasClient.call('resetAllData');
+        
+        // Optimistically clear all local state
+        appState.players = [];
+        appState.scoreboard = [];
+        appState.recentGames = [];
+        appState.history = [];
+        appState.latestGameNumber = 0;
+        appState.newGame.leaderId = null;
+        appState.newGame.results = {};
+        appState.newGame.customBets = {};
+        appState.newGame.multipliers = {};
+
+        renderScoreboard();
+        renderPlayersList();
+        renderHistoryList([]);
+        populateHistoryFilterOptions();
+        renderNewGameStep1Leader();
+        renderNewGameStep3Opponents();
+        renderNewGameStep5Preview();
+
+        await refreshAppData(false);
+        showToast('Đã xóa sạch toàn bộ dữ liệu thành công!', 'success');
+        navigateTo('scoreboard');
+      } catch (err) {
+        console.error('[handleResetAllData] Error:', err);
         showToast(`Lỗi: ${err.message}`, 'danger');
       }
     }
@@ -1721,25 +1931,226 @@ async function handleHealthCheck() {
   }
 }
 
-// Fallback Mock data handler for local testing
-function mockApiResponse(fn, args) {
-  if (fn === 'getAppBootstrapData') {
+// ==========================================================================
+// Fallback Mock Reactive Store for Standalone & Localhost Testing
+// ==========================================================================
+const LocalMockStore = {
+  _get() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem('CHOT_DIEM_LOCAL_STORE');
+        if (raw) return JSON.parse(raw);
+      }
+    } catch (e) {}
     return {
-      session: { appName: 'Chốt Điểm', sessionName: 'Demo Mock Session', defaultBet: 5 },
-      players: [
-        { playerId: 'P001', name: 'Đào', order: 1, active: true },
-        { playerId: 'P002', name: 'Tiến', order: 2, active: true },
-        { playerId: 'P003', name: 'Bình', order: 3, active: true }
-      ],
-      scoreboard: [
-        { rank: 1, playerId: 'P001', name: 'Đào', totalScore: 15, winCount: 2, loseCount: 0, drawCount: 0, gamesPlayed: 2, leaderCount: 1, active: true },
-        { rank: 2, playerId: 'P002', name: 'Tiến', totalScore: -5, winCount: 1, loseCount: 1, drawCount: 0, gamesPlayed: 2, leaderCount: 0, active: true },
-        { rank: 3, playerId: 'P003', name: 'Bình', totalScore: -10, winCount: 0, loseCount: 2, drawCount: 0, gamesPlayed: 2, leaderCount: 1, active: true }
-      ],
+      session: { appName: 'Chốt Điểm', sessionName: 'Phiên chơi mới', defaultBet: 5 },
+      players: [],
+      scoreboard: [],
       recentGames: [],
-      latestGameNumber: 2
+      latestGameNumber: 0
     };
+  },
+  _save(data) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('CHOT_DIEM_LOCAL_STORE', JSON.stringify(data));
+      }
+    } catch (e) {}
+  },
+  handle(fn, args) {
+    const store = this._get();
+
+    if (fn === 'getAppBootstrapData') {
+      return store;
+    }
+
+    if (fn === 'addPlayer') {
+      const name = String(args[0] || '').trim();
+      const existingIds = store.players.map((p) => p.playerId);
+      const nextNum = existingIds.length + 1;
+      const newId = 'P' + String(nextNum).padStart(3, '0');
+      const newPlayer = {
+        playerId: newId,
+        name: name,
+        order: nextNum,
+        active: true,
+        joinedAt: new Date().toISOString()
+      };
+      store.players.push(newPlayer);
+      store.scoreboard.push({
+        rank: store.scoreboard.length + 1,
+        playerId: newId,
+        name: name,
+        totalScore: 0,
+        winCount: 0,
+        loseCount: 0,
+        drawCount: 0,
+        gamesPlayed: 0,
+        leaderCount: 0,
+        active: true
+      });
+      this._save(store);
+      return newPlayer;
+    }
+
+    if (fn === 'updatePlayer') {
+      const [pId, payload] = args;
+      const p = store.players.find((item) => item.playerId === pId);
+      if (p && payload && payload.name) p.name = payload.name;
+      const s = store.scoreboard.find((item) => item.playerId === pId);
+      if (s && payload && payload.name) s.name = payload.name;
+      this._save(store);
+      return p;
+    }
+
+    if (fn === 'deactivatePlayer') {
+      const [pId] = args;
+      const p = store.players.find((item) => item.playerId === pId);
+      if (p) p.active = false;
+      this._save(store);
+      return p;
+    }
+
+    if (fn === 'saveGame') {
+      const payload = args[0] || {};
+      store.latestGameNumber = (store.latestGameNumber || 0) + 1;
+      const gameId = 'G' + String(store.latestGameNumber).padStart(4, '0');
+      const gameObj = {
+        gameId: gameId,
+        gameNumber: store.latestGameNumber,
+        leaderId: payload.leaderId,
+        defaultBet: payload.defaultBet || 5,
+        opponents: payload.opponents || [],
+        note: payload.note || '',
+        status: 'HOP_LE',
+        createdAt: new Date().toISOString()
+      };
+      store.recentGames.unshift(gameObj);
+      
+      let sumOpponentsDelta = 0;
+      (payload.opponents || []).forEach((opp) => {
+        let delta = 0;
+        if (opp.result === 'WIN') delta = opp.bet;
+        else if (opp.result === 'LOSE') delta = -opp.bet;
+        sumOpponentsDelta += delta;
+
+        const sc = store.scoreboard.find((s) => s.playerId === opp.playerId);
+        if (sc) {
+          sc.totalScore += delta;
+          sc.gamesPlayed += 1;
+          if (opp.result === 'WIN') sc.winCount += 1;
+          else if (opp.result === 'LOSE') sc.loseCount += 1;
+          else sc.drawCount += 1;
+        }
+      });
+
+      const leaderSc = store.scoreboard.find((s) => s.playerId === payload.leaderId);
+      if (leaderSc) {
+        leaderSc.totalScore += -sumOpponentsDelta;
+        leaderSc.gamesPlayed += 1;
+        leaderSc.leaderCount += 1;
+        if (-sumOpponentsDelta > 0) leaderSc.winCount += 1;
+        else if (-sumOpponentsDelta < 0) leaderSc.loseCount += 1;
+      }
+
+      store.scoreboard.sort((a, b) => b.totalScore - a.totalScore);
+      store.scoreboard.forEach((item, idx) => { item.rank = idx + 1; });
+
+      this._save(store);
+      return { game: gameObj, scoreboard: store.scoreboard, latestGameNumber: store.latestGameNumber };
+    }
+
+    if (fn === 'getGameHistory') {
+      return store.recentGames;
+    }
+
+    if (fn === 'getGameDetail') {
+      const gameId = args[0];
+      const g = store.recentGames.find((item) => item.gameId === gameId);
+      return g || null;
+    }
+
+    if (fn === 'rebuildSummarySheet') {
+      const scMap = new Map();
+      (store.players || []).forEach((p) => {
+        scMap.set(p.playerId, {
+          rank: 0,
+          playerId: p.playerId,
+          name: p.name,
+          totalScore: 0,
+          winCount: 0,
+          loseCount: 0,
+          drawCount: 0,
+          gamesPlayed: 0,
+          leaderCount: 0,
+          active: p.active !== false
+        });
+      });
+
+      (store.recentGames || []).forEach((g) => {
+        if (g.status === 'DA_HUY') return;
+        let sumOppDelta = 0;
+        (g.opponents || []).forEach((opp) => {
+          let delta = 0;
+          if (opp.result === 'WIN') delta = opp.bet;
+          else if (opp.result === 'LOSE') delta = -opp.bet;
+          sumOppDelta += delta;
+
+          const sc = scMap.get(opp.playerId);
+          if (sc) {
+            sc.totalScore += delta;
+            sc.gamesPlayed += 1;
+            if (opp.result === 'WIN') sc.winCount += 1;
+            else if (opp.result === 'LOSE') sc.loseCount += 1;
+            else sc.drawCount += 1;
+          }
+        });
+
+        const leaderSc = scMap.get(g.leaderId);
+        if (leaderSc) {
+          leaderSc.totalScore += -sumOppDelta;
+          leaderSc.gamesPlayed += 1;
+          leaderSc.leaderCount += 1;
+          if (-sumOppDelta > 0) leaderSc.winCount += 1;
+          else if (-sumOppDelta < 0) leaderSc.loseCount += 1;
+        }
+      });
+
+      store.scoreboard = Array.from(scMap.values()).sort((a, b) => b.totalScore - a.totalScore);
+      store.scoreboard.forEach((item, idx) => { item.rank = idx + 1; });
+      this._save(store);
+      return { ok: true, rowCount: store.scoreboard.length };
+    }
+
+    if (fn === 'resetSessionData') {
+      store.recentGames = [];
+      store.latestGameNumber = 0;
+      (store.scoreboard || []).forEach((s) => {
+        s.totalScore = 0;
+        s.winCount = 0;
+        s.loseCount = 0;
+        s.drawCount = 0;
+        s.gamesPlayed = 0;
+        s.leaderCount = 0;
+      });
+      this._save(store);
+      return { ok: true, reset: true, scoreboard: store.scoreboard, latestGameNumber: 0 };
+    }
+
+    if (fn === 'resetAllData') {
+      store.players = [];
+      store.scoreboard = [];
+      store.recentGames = [];
+      store.latestGameNumber = 0;
+      this._save(store);
+      return { ok: true, reset: true, players: [], scoreboard: [], latestGameNumber: 0 };
+    }
+
+    return {};
   }
-  return {};
+};
+
+function mockApiResponse(fn, args) {
+  return LocalMockStore.handle(fn, args);
 }
 </script>

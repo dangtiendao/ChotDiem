@@ -60,6 +60,8 @@
           </button>
         </div>
       </div>
+      <!-- Global Top Sync Progress Bar -->
+      <div id="sync-progress-bar" class="sync-progress-bar" aria-hidden="true"></div>
     </header>
 
     <!-- Main Views Container -->
@@ -84,10 +86,10 @@
           <span>Chốt Điểm Ván Mới</span>
         </div>
 
-        <!-- Step 1: Chọn Người Cầm Đầu A -->
+        <!-- Step 1: Chọn Người Cầm Chương -->
         <div class="step-card">
           <div class="step-header">
-            <span style="font-weight: 700; font-size: 0.95rem;">1. Chọn Người Cầm Đầu (A)</span>
+            <span style="font-weight: 700; font-size: 0.95rem;">1. Chọn Người Cầm Chương</span>
             <span class="step-badge">Bắt buộc</span>
           </div>
           <div id="step-leader-list" class="leader-grid">
@@ -120,11 +122,11 @@
           <!-- Dynamic Live Preview Bar -->
         </div>
 
-        <!-- Step 6: Chốt Ván Button (Sticky) -->
+        <!-- Step 6: Chốt Ván Button -->
         <div class="sticky-action-bar">
           <button type="button" id="btn-submit-game" class="btn-primary-large" onclick="submitGame()">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            Chốt Ván Đấu
+            <span>Chốt Ván Đấu</span>
           </button>
         </div>
       </section>
@@ -150,9 +152,9 @@
               </select>
             </div>
             <div class="filter-col">
-              <label class="filter-label" for="filter-leader">Người cầm đầu</label>
+              <label class="filter-label" for="filter-leader">Người cầm chương</label>
               <select id="filter-leader" class="filter-select">
-                <option value="">-- Tất cả A --</option>
+                <option value="">-- Tất cả người cầm chương --</option>
               </select>
             </div>
           </div>
@@ -239,7 +241,13 @@
           <hr style="border: none; border-top: 1px solid var(--border-light);">
           <div>
             <button type="button" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="rebuildScoreboardManual()">
-              🔄 Tính lại toàn bộ bảng điểm
+              🔄 Tính lại bảng điểm từ lịch sử ván
+            </button>
+            <button type="button" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px; color: var(--color-danger); border-color: rgba(217, 48, 37, 0.3);" onclick="handleResetScoreboard()">
+              🧹 Đặt lại điểm số về 0 (Giữ người chơi)
+            </button>
+            <button type="button" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px; color: #b71c1c; border-color: rgba(183, 28, 28, 0.4); background-color: #fdf2f2;" onclick="handleResetAllData()">
+              🗑️ Xóa trắng toàn bộ (Cả người chơi & ván)
             </button>
             <button type="button" id="btn-export-csv" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="handleExportData('csv')">
               📥 Xuất Dữ Liệu (CSV Excel)

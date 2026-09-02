@@ -1130,6 +1130,98 @@ function undoGame(gameId, expectedVersion) {
   return cancelGame(gId, 'QUICK_UNDO', expectedVersion);
 }
 
+/**
+ * Resets all games in the session to start a fresh game session (Scoreboard reset to 0).
+ * Preserves all registered players in NGUOI_CHOI.
+ *
+ * @returns {{ ok: boolean, success: boolean, data?: { reset: boolean }, error?: Object, message?: string }}
+ */
+function resetSessionData() {
+  return _UTILS_GAME.withDocumentLock(() => {
+    const ss = _UTILS_GAME.getActiveSpreadsheet();
+    const roundSheet = ss.getSheetByName(_CFG_GAME.SHEET_NAMES.VAN_DAU);
+
+    if (roundSheet && roundSheet.getLastRow() > 1) {
+      roundSheet.clearContents();
+      roundSheet.getRange(1, 1, 1, _CFG_GAME.HEADERS.VAN_DAU.length).setValues([_CFG_GAME.HEADERS.VAN_DAU]);
+    }
+
+    if (typeof _SUM_GAME.rebuildSummarySheet === 'function') {
+      _SUM_GAME.rebuildSummarySheet();
+    }
+
+    if (typeof _UTILS_GAME.logImportantEvent === 'function') {
+      _UTILS_GAME.logImportantEvent('INFO', 'RESET_SESSION', {
+        source: 'GameService',
+        handler: 'resetSessionData',
+        message: 'Đã đặt lại toàn bộ ván đấu về 0 cho phiên chơi mới.'
+      });
+    }
+
+    const scoreboardRes = _SUM_GAME.getScoreboard();
+    return _UTILS_GAME.responseOk(
+      {
+        reset: true,
+        scoreboard: scoreboardRes.ok ? scoreboardRes.data : [],
+        latestGameNumber: 0
+      },
+      'Đã đặt lại bảng điểm về 0 cho phiên chơi mới thành công.'
+    );
+  });
+}
+
+/**
+ * Completely wipes all game rounds AND all players (Factory Reset).
+ * Leaves sheets clean with headers only.
+ *
+ * @returns {{ ok: boolean, success: boolean, data?: { reset: boolean }, error?: Object, message?: string }}
+ */
+function resetAllData() {
+  return _UTILS_GAME.withDocumentLock(() => {
+    const ss = _UTILS_GAME.getActiveSpreadsheet();
+    const roundSheet = ss.getSheetByName(_CFG_GAME.SHEET_NAMES.VAN_DAU);
+    const playerSheet = ss.getSheetByName(_CFG_GAME.SHEET_NAMES.NGUOI_CHOI);
+    const summarySheet = ss.getSheetByName(_CFG_GAME.SHEET_NAMES.TONG_KET);
+
+    if (roundSheet && roundSheet.getLastRow() > 1) {
+      roundSheet.clearContents();
+      roundSheet.getRange(1, 1, 1, _CFG_GAME.HEADERS.VAN_DAU.length).setValues([_CFG_GAME.HEADERS.VAN_DAU]);
+    }
+
+    if (playerSheet && playerSheet.getLastRow() > 1) {
+      playerSheet.clearContents();
+      playerSheet.getRange(1, 1, 1, _CFG_GAME.HEADERS.NGUOI_CHOI.length).setValues([_CFG_GAME.HEADERS.NGUOI_CHOI]);
+    }
+
+    if (summarySheet && summarySheet.getLastRow() > 1) {
+      summarySheet.clearContents();
+      summarySheet.getRange(1, 1, 1, _CFG_GAME.HEADERS.TONG_KET.length).setValues([_CFG_GAME.HEADERS.TONG_KET]);
+    }
+
+    if (_PLAYER_GAME && typeof _PLAYER_GAME.invalidatePlayerCache === 'function') {
+      _PLAYER_GAME.invalidatePlayerCache();
+    }
+
+    if (typeof _UTILS_GAME.logImportantEvent === 'function') {
+      _UTILS_GAME.logImportantEvent('INFO', 'RESET_ALL_DATA', {
+        source: 'GameService',
+        handler: 'resetAllData',
+        message: 'Đã xóa toàn bộ dữ liệu người chơi và ván đấu về trạng thái ban đầu.'
+      });
+    }
+
+    return _UTILS_GAME.responseOk(
+      {
+        reset: true,
+        players: [],
+        scoreboard: [],
+        latestGameNumber: 0
+      },
+      'Đã xóa sạch toàn bộ người chơi và ván đấu thành công.'
+    );
+  });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     calculatePlayerDelta,
@@ -1144,6 +1236,8 @@ if (typeof module !== 'undefined' && module.exports) {
     updateGame,
     cancelGame,
     restoreGame,
-    undoGame
+    undoGame,
+    resetSessionData,
+    resetAllData
   };
 }
