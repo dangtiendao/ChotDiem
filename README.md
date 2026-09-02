@@ -6,23 +6,23 @@
 
 ---
 
-## 🌟 Tính Năng Hoàn Chỉnh (Phase 1, 2, 3, 4 & 5)
+## 🌟 Tính Năng Hoàn Chỉnh (Phase 1 đến Phase 6)
 
 - **Mobile-First Touch UI:** Giao diện tối ưu cho điện thoại di động, thao tác 1 chạm, vùng chạm lớn ($\ge 48\text{px}$), không cần mở bàn phím để chọn kết quả.
-- **5 Màn Hình Trực Quan:** Bảng điểm (xếp hạng, top 3), Ván mới (nhập 6 bước nhanh), Lịch sử ván (bộ lọc đa điều kiện), Quản lý người chơi, Cài đặt phiên.
+- **5 Màn Hình Trực Quan:** Bảng điểm (xếp hạng thể thao, top 3), Ván mới (nhập 6 bước nhanh), Lịch sử ván (bộ lọc đa điều kiện), Quản lý người chơi, Cài đặt phiên.
 - **Mô hình Ván đấu Zero-Sum:** 1 Người cầm đầu ($A$) và nhiều Người đối đầu ($opp$). Tổng biến động toàn ván luôn triệt tiêu về 0: $\Delta_A + \sum \Delta_{opp} = 0$.
 - **Lưu trữ nguyên tử 1 ván = 1 dòng:** Mảng chi tiết kết quả đối đầu lưu trong cột `CHI_TIET_JSON` của sheet `VAN_DAU`.
 - **Tích hợp & Khởi tạo siêu tốc (Phase 5):** API `getAppBootstrapData()` gom toàn bộ phiên, người chơi, bảng điểm, lịch sử trong 1 roundtrip duy nhất.
 - **Bộ nhớ đệm (CacheService - Phase 5):** Cache danh sách người chơi và cấu hình trong RAM của Google Apps Script, tự động xóa cache khi có thay đổi.
-- **Bảo vệ đồng thời nhiều thiết bị (Multi-Device Concurrency - Phase 5):** Kiểm tra `expectedLatestGameNumber`, tự động phát hiện `STALE_DATA` khi máy khác vừa chốt ván và cảnh báo bảo lưu dữ liệu form.
-- **Chống lưu trùng (Idempotency - Phase 5):** Mỗi request mang `requestId` duy nhất, không tạo dòng thừa khi ấn đúp hoặc gửi lại.
+- **Bảo vệ đồng thời nhiều thiết bị (Multi-Device Protection - Phase 5 & 6):** Kiểm tra `expectedLatestGameNumber` (phát hiện `STALE_DATA`), kiểm soát phiên bản lạc quan (`VERSION_CONFLICT`) khi sửa ván cũ.
+- **Chống lưu trùng (Idempotency - Phase 5 & 6):** Mỗi request mang `requestId` duy nhất, không tạo dòng thừa khi ấn đúp hoặc gửi lại.
 - **Nhận diện thương hiệu chính thức (Phase 5):** Tên "Chốt Điểm", Slogan "Chạm nhanh, tính chuẩn, vui trọn cuộc chơi", Logo SVG, Favicon, Màn hình chào (Splash Screen) và CSS Tokens.
 - **Lịch sử & Bộ lọc đa điều kiện (Phase 4):** Lọc theo người chơi, người cầm đầu, kết quả (Thắng/Hòa/Thua), khoảng số ván, trạng thái ván.
 - **Xem chi tiết & Chỉnh sửa ván đấu (Phase 4):** Bottom sheet xem chi tiết từng người chơi; cho phép sửa kết quả, sửa cược, đổi người cầm đầu với cảnh báo an toàn.
 - **Hủy & Khôi phục ván (Phase 4):** Xóa mềm an toàn (trạng thái `DA_HUY`, `DA_CHINH_SUA`), tự động cập nhật bảng tổng điểm.
 - **Hệ thống Audit Log (Phase 4):** Sheet `LICH_SU_THAY_DOI` lưu vết snapshot đầy đủ mọi thao tác `CREATE`, `EDIT`, `CANCEL`, `RESTORE`, `UNDO`.
 - **Hoàn tác nhanh (Quick Undo - Phase 4):** Nút hoàn tác nổi 8 giây sau khi chốt ván với thanh đếm ngược thời gian thực.
-- **Cơ chế khóa đồng thời (LockService):** Chống xung đột dữ liệu khi nhiều người dùng cùng thao tác.
+- **Bộ Kiểm Thử Toàn Diện (Phase 6):** 77/77 Unit & Integration test cases bao quát logic tính điểm, bất biến toán học Zero-sum, đối soát độc lập, chống ván trùng và xử lý đồng thời.
 
 ---
 
@@ -31,9 +31,9 @@
 ```
 ├── appsscript.json        # Apps Script Manifest (V8, Asia/Ho_Chi_Minh)
 ├── Config.gs              # Hằng số, Tên app, Slogan, Headers, Enums, Cache keys & Error codes
-├── Utils.gs               # Tiện ích chung, LockService, CacheService, getLatestGameNumber, Audit logger
+├── Utils.gs               # Tiện ích chung, LockService, CacheService, getLatestGameNumber, getGameCurrentVersion
 ├── PlayerService.gs       # Quản lý người chơi với Cache (get, add, update, deactivate, reorder)
-├── GameService.gs         # Nghiệp vụ ván đấu, getAppBootstrapData, saveGame (STALE_DATA & Idempotency)
+├── GameService.gs         # Nghiệp vụ ván đấu, getAppBootstrapData, saveGame, updateGame (STALE_DATA & Versioning)
 ├── SummaryService.gs      # Tổng kết và xếp hạng trong bộ nhớ (getScoreboard, rebuildSummarySheet)
 ├── Code.gs                # Điểm vào chính, setupApp(), getAppStatus(), include(), doGet(), doPost()
 ├── Test.gs                # Bộ test thủ công trực tiếp trên Apps Script Console
@@ -46,27 +46,31 @@
 │   ├── phase-2-backend-guide.md
 │   ├── phase-3-frontend-guide.md
 │   ├── phase-4-history-guide.md
-│   └── phase-5-integration-optimization-guide.md
+│   ├── phase-5-integration-optimization-guide.md
+│   ├── phase-6-test-plan.md
+│   ├── phase-6-test-report.md
+│   └── phase-6-manual-device-checklist.md
 ├── src/                   # Core Pure logic modules (hỗ trợ test cục bộ)
 └── tests/
     ├── phase1.test.js     # Test suite Phase 1 Core (21/21 passed)
     ├── phase2.test.js     # Test suite Phase 2 Backend Mock (18/18 passed)
     ├── phase3.test.js     # Test suite Phase 3 UI Structure (6/6 passed)
     ├── phase4.test.js     # Test suite Phase 4 History & Audit (13/13 passed)
-    └── phase5.test.js     # Test suite Phase 5 Integration & Multi-device (9/9 passed)
+    ├── phase5.test.js     # Test suite Phase 5 Integration & Multi-device (9/9 passed)
+    └── phase6.test.js     # Test suite Phase 6 QA & Concurrency (19/19 passed)
 ```
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt & Chạy Thử
+## 🚀 Hướng Dẫn Cài Đặt & Chạy Kiểm Thử
 
-### 1. Chạy toàn bộ Unit Tests (67/67 tests)
+### 1. Chạy toàn bộ 77 Unit & Integration Tests
 ```bash
 npm test
 ```
 
 ### 2. Triển khai lên Google Apps Script
-Chi tiết xem tại tài liệu: [docs/phase-5-integration-optimization-guide.md](docs/phase-5-integration-optimization-guide.md)
+Chi tiết xem tại tài liệu: [docs/phase-6-manual-device-checklist.md](docs/phase-6-manual-device-checklist.md)
 
 1. Mở Google Sheet > **Tiện ích mở rộng** > **Apps Script**.
 2. Sao chép toàn bộ các file `.gs`, `.html` và `appsscript.json` vào dự án Apps Script.
