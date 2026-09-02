@@ -1,45 +1,64 @@
 /**
- * @fileoverview Utils.gs - Shared Utility Functions, Lock Management and Response Formatting
- * Google Apps Script V8 Runtime
+ * @fileoverview Utils.gs - Shared Utility Functions, Lock Management, Cache & Response Formatting
+ * Google Apps Script V8 Runtime - Phase 5 Complete
  */
 
 const _CONFIG = typeof CONFIG !== 'undefined' ? CONFIG : (typeof require !== 'undefined' ? require('./Config.gs') : {});
 
 /**
- * Creates a standard success response object.
+ * Creates a standardized success response object.
  * @param {any} data - Response payload
  * @param {string} [message=""] - User-friendly message
- * @returns {{ ok: true, data: any, message: string }}
+ * @param {Object} [meta={}] - Metadata (latestGameNumber, etc.)
+ * @returns {{ ok: true, success: true, data: any, message: string, errorCode: null, error: null, meta: Object }}
  */
-function responseOk(data, message = '') {
+function responseOk(data, message = '', meta = {}) {
   return {
     ok: true,
+    success: true,
     data: data !== undefined ? data : null,
-    message: String(message || '')
+    message: String(message || ''),
+    errorCode: null,
+    error: null,
+    meta: {
+      serverTimestamp: new Date().toISOString(),
+      ...meta
+    }
   };
 }
 
 /**
- * Creates a standard error response object.
+ * Creates a standardized error response object.
  * @param {string} code - Error code from CONFIG.ERROR_CODES
  * @param {string} message - User-friendly error message
- * @param {any} [details=null] - Additional error details (non-sensitive)
- * @returns {{ ok: false, error: { code: string, message: string, details: any } }}
+ * @param {any} [details=null] - Additional non-sensitive error details
+ * @param {Object} [meta={}] - Additional metadata
+ * @returns {{ ok: false, success: false, data: null, message: string, errorCode: string, error: Object, meta: Object }}
  */
-function responseError(code, message, details = null) {
+function responseError(code, message, details = null, meta = {}) {
+  const errCode = String(code || _CONFIG.ERROR_CODES.INTERNAL_ERROR);
+  const errMsg = String(message || 'Đã xảy ra lỗi không xác định.');
   return {
     ok: false,
+    success: false,
+    data: null,
+    message: errMsg,
+    errorCode: errCode,
     error: {
-      code: String(code || _CONFIG.ERROR_CODES.INTERNAL_ERROR),
-      message: String(message || 'Đã xảy ra lỗi không xác định.'),
+      code: errCode,
+      message: errMsg,
       details: details !== undefined ? details : null
+    },
+    meta: {
+      serverTimestamp: new Date().toISOString(),
+      ...meta
     }
   };
 }
 
 /**
  * Helper to get the active container-bound Spreadsheet.
- * @param {string} [spreadsheetId] - Optional explicit ID for testing/standalone usage
+ * @param {string} [spreadsheetId] - Optional explicit ID for standalone usage
  * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
 function getActiveSpreadsheet(spreadsheetId) {
@@ -70,7 +89,6 @@ function withDocumentLock(callback, timeoutMs) {
   const timeout = timeoutMs || _CONFIG.DEFAULTS.LOCK_TIMEOUT_MS;
 
   if (typeof LockService === 'undefined') {
-    // If running in local test environment without Apps Script mock, execute directly
     return callback();
   }
 
@@ -78,7 +96,6 @@ function withDocumentLock(callback, timeoutMs) {
   try {
     lock = LockService.getDocumentLock();
   } catch (e) {
-    // Fallback to script lock if container document lock is unavailable
     lock = LockService.getScriptLock();
   }
 
@@ -104,6 +121,76 @@ function withDocumentLock(callback, timeoutMs) {
 }
 
 /**
+ * In-memory fallback cache for Node.js / standalone testing environment.
+ */
+const _localMemoryCache = new Map();
+
+/**
+ * Retrieves cached data using Google Apps Script CacheService.
+ * @param {string} key - Cache key
+ * @returns {any|null} Parsed cached data or null
+ */
+function getAppCache(key) {
+  try {
+    if (typeof CacheService !== 'undefined') {
+      const cache = CacheService.getScriptCache();
+      const raw = cache.get(String(key));
+      return raw ? safeJsonParse(raw, null) : null;
+    } else {
+      const entry = _localMemoryCache.get(String(key));
+      if (entry && entry.expiresAt > Date.now()) {
+        return entry.data;
+      }
+      return null;
+    }
+  } catch (err) {
+    console.warn(`[Cache] Error reading key '${key}':`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Stores data in CacheService with TTL.
+ * @param {string} key - Cache key
+ * @param {any} data - Data to cache
+ * @param {number} [ttlSeconds=600] - Time to live in seconds (default: 10 mins)
+ */
+function setAppCache(key, data, ttlSeconds = 600) {
+  try {
+    if (data === undefined || data === null) return;
+    const str = safeJsonStringify(data);
+    if (typeof CacheService !== 'undefined') {
+      const cache = CacheService.getScriptCache();
+      cache.put(String(key), str, Math.min(21600, Math.max(1, ttlSeconds)));
+    } else {
+      _localMemoryCache.set(String(key), {
+        data: data,
+        expiresAt: Date.now() + ttlSeconds * 1000
+      });
+    }
+  } catch (err) {
+    console.warn(`[Cache] Error setting key '${key}':`, err.message);
+  }
+}
+
+/**
+ * Removes cached key from CacheService.
+ * @param {string} key - Cache key to remove
+ */
+function clearAppCache(key) {
+  try {
+    if (typeof CacheService !== 'undefined') {
+      const cache = CacheService.getScriptCache();
+      cache.remove(String(key));
+    } else {
+      _localMemoryCache.delete(String(key));
+    }
+  } catch (err) {
+    console.warn(`[Cache] Error clearing key '${key}':`, err.message);
+  }
+}
+
+/**
  * Reads header row of a sheet and builds a 1-based column mapping index: { [headerName]: colIndex }
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - Google Sheet instance
  * @returns {Object<string, number>} Map of header names to 1-based column indices
@@ -124,11 +211,35 @@ function getHeaderMap(sheet) {
   for (let i = 0; i < headerRow.length; i++) {
     const name = String(headerRow[i] || '').trim();
     if (name) {
-      map[name] = i + 1; // 1-based column index
+      map[name] = i + 1;
     }
   }
 
   return map;
+}
+
+/**
+ * Fast helper to get latest sequential game number from VAN_DAU sheet without full table scan.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss - Spreadsheet
+ * @returns {number} Latest game number (0 if no games)
+ */
+function getLatestGameNumber(ss) {
+  try {
+    if (!ss) return 0;
+    const roundSheet = ss.getSheetByName(_CONFIG.SHEET_NAMES.VAN_DAU);
+    if (!roundSheet) return 0;
+    const lastRow = roundSheet.getLastRow();
+    if (lastRow <= 1) return 0;
+
+    const headerMap = getHeaderMap(roundSheet);
+    const colGameNum = headerMap.SO_VAN || 2;
+    const val = roundSheet.getRange(lastRow, colGameNum, 1, 1).getValue();
+    const num = parseInt(val, 10);
+    return isNaN(num) ? lastRow - 1 : num;
+  } catch (err) {
+    console.warn('[getLatestGameNumber] Error:', err);
+    return 0;
+  }
 }
 
 /**
@@ -293,7 +404,11 @@ if (typeof module !== 'undefined' && module.exports) {
     responseError,
     getActiveSpreadsheet,
     withDocumentLock,
+    getAppCache,
+    setAppCache,
+    clearAppCache,
     getHeaderMap,
+    getLatestGameNumber,
     normalizeString,
     safeJsonParse,
     safeJsonStringify,

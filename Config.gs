@@ -1,9 +1,15 @@
 /**
  * @fileoverview Config.gs - Configuration, Constants and Enums for Web App "Chốt Điểm"
- * Google Apps Script V8 Runtime
+ * Google Apps Script V8 Runtime - Phase 5 Complete
  */
 
 const CONFIG = {
+  APP_INFO: {
+    NAME: 'Chốt Điểm',
+    SLOGAN: 'Chạm nhanh, tính chuẩn, vui trọn cuộc chơi.',
+    VERSION: '1.0.0'
+  },
+
   SHEET_NAMES: {
     CAU_HINH: 'CAU_HINH',
     NGUOI_CHOI: 'NGUOI_CHOI',
@@ -14,6 +20,7 @@ const CONFIG = {
 
   CONFIG_KEYS: {
     TEN_APP: 'TEN_APP',
+    SLOGAN: 'SLOGAN',
     MA_PHIEN: 'MA_PHIEN',
     TEN_PHIEN: 'TEN_PHIEN',
     CUOC_MAC_DINH: 'CUOC_MAC_DINH',
@@ -43,7 +50,8 @@ const CONFIG = {
       'DIEM_CAM_DAU',
       'TONG_GIAO_DICH',
       'GHI_CHU',
-      'TRANG_THAI'
+      'TRANG_THAI',
+      'MA_REQUEST'
     ],
     TONG_KET: [
       'MA_NGUOI_CHOI',
@@ -99,6 +107,12 @@ const CONFIG = {
     UNDO: 'UNDO'
   },
 
+  CACHE_KEYS: {
+    PLAYERS: 'CHOT_DIEM_PLAYERS',
+    SETTINGS: 'CHOT_DIEM_SETTINGS',
+    TTL_SECONDS: 600 // 10 minutes
+  },
+
   ERROR_CODES: {
     INVALID_ARGUMENT: 'INVALID_ARGUMENT',
     VALIDATION_ERROR: 'VALIDATION_ERROR',
@@ -120,15 +134,19 @@ const CONFIG = {
     GAME_NOT_EDITABLE: 'GAME_NOT_EDITABLE',
     UNDO_EXPIRED: 'UNDO_EXPIRED',
     VERSION_CONFLICT: 'VERSION_CONFLICT',
+    STALE_DATA: 'STALE_DATA',
+    DUPLICATE_REQUEST: 'DUPLICATE_REQUEST',
     SUMMARY_REBUILD_FAILED: 'SUMMARY_REBUILD_FAILED',
     INVALID_GAME_DATA: 'INVALID_GAME_DATA',
     SHEET_NOT_INITIALIZED: 'SHEET_NOT_INITIALIZED',
     LOCK_TIMEOUT: 'LOCK_TIMEOUT',
+    CACHE_ERROR: 'CACHE_ERROR',
     INTERNAL_ERROR: 'INTERNAL_ERROR'
   },
 
   DEFAULTS: {
     APP_NAME: 'Chốt Điểm',
+    SLOGAN: 'Chạm nhanh, tính chuẩn, vui trọn cuộc chơi.',
     DEFAULT_BET: 5,
     TIMEZONE: 'Asia/Ho_Chi_Minh',
     SCHEMA_VERSION: '1.0.0',
@@ -138,18 +156,6 @@ const CONFIG = {
     QUICK_UNDO_TIMEOUT_MS: 8000 // 8 seconds quick undo window
   }
 };
-
-// Freeze configuration object to prevent runtime mutations
-Object.freeze(CONFIG);
-Object.freeze(CONFIG.SHEET_NAMES);
-Object.freeze(CONFIG.CONFIG_KEYS);
-Object.freeze(CONFIG.HEADERS);
-Object.freeze(CONFIG.SESSION_STATUS);
-Object.freeze(CONFIG.PLAYER_STATUS);
-Object.freeze(CONFIG.MATCH_RESULT);
-Object.freeze(CONFIG.ROUND_STATUS);
-Object.freeze(CONFIG.ERROR_CODES);
-Object.freeze(CONFIG.DEFAULTS);
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = CONFIG;

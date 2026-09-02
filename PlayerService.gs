@@ -1,20 +1,31 @@
 /**
- * @fileoverview PlayerService.gs - Player Management Business Logic
+ * @fileoverview PlayerService.gs - Player Management Business Logic with Caching (Phase 5)
  * Google Apps Script V8 Runtime
  */
 
 const _CFG_PLAYER = typeof CONFIG !== 'undefined' ? CONFIG : (typeof require !== 'undefined' ? require('./Config.gs') : {});
 const _UTILS_PLAYER = typeof responseOk !== 'undefined'
-  ? { responseOk, responseError, getActiveSpreadsheet, withDocumentLock, getHeaderMap, normalizeString, generateNextPlayerId }
+  ? { responseOk, responseError, getActiveSpreadsheet, withDocumentLock, getAppCache, setAppCache, clearAppCache, getHeaderMap, normalizeString, generateNextPlayerId }
   : (typeof require !== 'undefined' ? require('./Utils.gs') : {});
 
 /**
  * Retrieves the list of players in the current session.
+ * Uses CacheService for high-speed retrieval if available.
+ *
  * @param {boolean} [includeInactive=false] - Whether to include deactivated (NGUNG_CHOI) players
- * @returns {{ ok: boolean, data?: Array<Object>, error?: Object }}
+ * @returns {{ ok: boolean, success: boolean, data?: Array<Object>, error?: Object, message?: string }}
  */
 function getPlayers(includeInactive = false) {
   try {
+    const cacheKey = `${_CFG_PLAYER.CACHE_KEYS.PLAYERS}_${includeInactive ? 'ALL' : 'ACTIVE'}`;
+
+    if (typeof _UTILS_PLAYER.getAppCache === 'function') {
+      const cached = _UTILS_PLAYER.getAppCache(cacheKey);
+      if (cached && Array.isArray(cached)) {
+        return _UTILS_PLAYER.responseOk(cached, 'Lấy danh sách người chơi từ cache thành công.');
+      }
+    }
+
     const ss = _UTILS_PLAYER.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(_CFG_PLAYER.SHEET_NAMES.NGUOI_CHOI);
 
@@ -45,7 +56,7 @@ function getPlayers(includeInactive = false) {
     for (let i = 0; i < values.length; i++) {
       const row = values[i];
       const pId = String(row[colId] || '').trim();
-      if (!pId) continue; // Skip empty row
+      if (!pId) continue;
 
       const status = String(row[colStatus] || _CFG_PLAYER.PLAYER_STATUS.DANG_CHOI).trim().toUpperCase();
       const isActive = status === _CFG_PLAYER.PLAYER_STATUS.DANG_CHOI;
@@ -66,8 +77,11 @@ function getPlayers(includeInactive = false) {
       });
     }
 
-    // Sort by display order ASC
     players.sort((a, b) => a.order - b.order);
+
+    if (typeof _UTILS_PLAYER.setAppCache === 'function') {
+      _UTILS_PLAYER.setAppCache(cacheKey, players, _CFG_PLAYER.CACHE_KEYS.TTL_SECONDS);
+    }
 
     return _UTILS_PLAYER.responseOk(players, 'Lấy danh sách người chơi thành công.');
   } catch (err) {
@@ -77,11 +91,21 @@ function getPlayers(includeInactive = false) {
 }
 
 /**
+ * Invalidates player caches.
+ */
+function invalidatePlayerCache() {
+  if (typeof _UTILS_PLAYER.clearAppCache === 'function') {
+    _UTILS_PLAYER.clearAppCache(`${_CFG_PLAYER.CACHE_KEYS.PLAYERS}_ALL`);
+    _UTILS_PLAYER.clearAppCache(`${_CFG_PLAYER.CACHE_KEYS.PLAYERS}_ACTIVE`);
+  }
+}
+
+/**
  * Adds a new player to the session.
  * Protected by LockService to prevent concurrent duplicate adds.
  *
  * @param {string} name - Player display name
- * @returns {{ ok: boolean, data?: Object, error?: Object, message?: string }}
+ * @returns {{ ok: boolean, success: boolean, data?: Object, error?: Object, message?: string }}
  */
 function addPlayer(name) {
   const cleanName = _UTILS_PLAYER.normalizeString(name);
@@ -137,7 +161,6 @@ function addPlayer(name) {
           maxOrder = pOrder;
         }
 
-        // Check duplicate name (case-insensitive)
         if (pName.toLowerCase() === cleanName.toLowerCase()) {
           return _UTILS_PLAYER.responseError(
             _CFG_PLAYER.ERROR_CODES.DUPLICATE_PLAYER,
@@ -151,7 +174,6 @@ function addPlayer(name) {
     const nextOrder = maxOrder + 1;
     const now = new Date();
 
-    // Prepare row data matching header positions
     const expectedHeaders = _CFG_PLAYER.HEADERS.NGUOI_CHOI;
     const newRow = new Array(expectedHeaders.length).fill('');
 
@@ -162,6 +184,8 @@ function addPlayer(name) {
     newRow[headerMap.THOI_GIAN_THEM - 1] = now;
 
     sheet.appendRow(newRow);
+
+    invalidatePlayerCache();
 
     const createdPlayer = {
       playerId: newPlayerId,
@@ -180,7 +204,7 @@ function addPlayer(name) {
  * Updates an existing player's display name or status.
  * @param {string} playerId - ID of the player to update (e.g. 'P001')
  * @param {Object} data - Update payload: { name?: string, status?: string }
- * @returns {{ ok: boolean, data?: Object, error?: Object, message?: string }}
+ * @returns {{ ok: boolean, success: boolean, data?: Object, error?: Object, message?: string }}
  */
 function updatePlayer(playerId, data) {
   const pId = String(playerId || '').trim();
@@ -237,7 +261,7 @@ function updatePlayer(playerId, data) {
       const existingName = String(row[colName] || '').trim();
 
       if (id === pId) {
-        targetRowIndex = i + 2; // 1-based sheet row index
+        targetRowIndex = i + 2;
         currentRow = row;
       } else if (cleanNewName !== null && existingName.toLowerCase() === cleanNewName.toLowerCase()) {
         return _UTILS_PLAYER.responseError(
@@ -251,7 +275,6 @@ function updatePlayer(playerId, data) {
       return _UTILS_PLAYER.responseError(_CFG_PLAYER.ERROR_CODES.NOT_FOUND, `Không tìm thấy người chơi '${pId}'.`);
     }
 
-    // Apply updates
     if (cleanNewName !== null) {
       currentRow[colName] = cleanNewName;
     }
@@ -263,8 +286,9 @@ function updatePlayer(playerId, data) {
       }
     }
 
-    // Write back updated row
     sheet.getRange(targetRowIndex, 1, 1, lastCol).setValues([currentRow]);
+
+    invalidatePlayerCache();
 
     const updatedStatus = String(currentRow[colStatus] || _CFG_PLAYER.PLAYER_STATUS.DANG_CHOI);
     const updatedPlayer = {
@@ -285,7 +309,7 @@ function updatePlayer(playerId, data) {
  * Does NOT delete row or historical match data.
  *
  * @param {string} playerId - ID of the player to deactivate
- * @returns {{ ok: boolean, data?: Object, error?: Object, message?: string }}
+ * @returns {{ ok: boolean, success: boolean, data?: Object, error?: Object, message?: string }}
  */
 function deactivatePlayer(playerId) {
   const pId = String(playerId || '').trim();
@@ -299,14 +323,13 @@ function deactivatePlayer(playerId) {
 /**
  * Reorders active players by updating their display order (THU_TU).
  * @param {string[]} playerIds - Ordered array of all active player IDs
- * @returns {{ ok: boolean, data?: Array<Object>, error?: Object, message?: string }}
+ * @returns {{ ok: boolean, success: boolean, data?: Array<Object>, error?: Object, message?: string }}
  */
 function reorderPlayers(playerIds) {
   if (!Array.isArray(playerIds) || playerIds.length === 0) {
     return _UTILS_PLAYER.responseError(_CFG_PLAYER.ERROR_CODES.INVALID_ARGUMENT, 'Danh sách thứ tự người chơi phải là một mảng không rỗng.');
   }
 
-  // Check duplicate IDs in input
   const uniqueIds = new Set(playerIds);
   if (uniqueIds.size !== playerIds.length) {
     return _UTILS_PLAYER.responseError(_CFG_PLAYER.ERROR_CODES.VALIDATION_ERROR, 'Danh sách sắp xếp chứa mã người chơi bị trùng lặp.');
@@ -340,7 +363,6 @@ function reorderPlayers(playerIds) {
       }
     }
 
-    // Validate that all playerIds exist
     for (const id of playerIds) {
       if (!rowIndexMap.has(id)) {
         return _UTILS_PLAYER.responseError(
@@ -350,17 +372,16 @@ function reorderPlayers(playerIds) {
       }
     }
 
-    // Update orders according to array index
     for (let newOrder = 0; newOrder < playerIds.length; newOrder++) {
       const pId = playerIds[newOrder];
       const rowIndex = rowIndexMap.get(pId);
       values[rowIndex][colOrder] = newOrder + 1;
     }
 
-    // Write back entire block in one batch operation
     sheet.getRange(2, 1, values.length, lastCol).setValues(values);
 
-    // Return updated players list
+    invalidatePlayerCache();
+
     return getPlayers(false);
   });
 }
@@ -371,6 +392,7 @@ if (typeof module !== 'undefined' && module.exports) {
     addPlayer,
     updatePlayer,
     deactivatePlayer,
-    reorderPlayers
+    reorderPlayers,
+    invalidatePlayerCache
   };
 }

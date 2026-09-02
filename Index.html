@@ -3,31 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Chốt Điểm - Web App Tính Điểm Ván Đấu</title>
+  <title>Chốt Điểm - Chạm nhanh, tính chuẩn, vui trọn cuộc chơi</title>
   
+  <!-- Favicon SVG Data URI -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231a73e8'/%3E%3Ccircle cx='32' cy='32' r='14' fill='%23f59e0b'/%3E%3Cpath d='M26 32l4 4 8-8' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+
   <!-- Include Mobile-First CSS Styles -->
   <?!= include('Styles'); ?>
 </head>
 <body>
+  <!-- Phase 5: Màn hình chào (Splash Screen - Task 5.4) -->
+  <div id="splash-screen" class="splash-screen" role="dialog" aria-modal="true" aria-label="Đang tải Chốt Điểm">
+    <div class="splash-logo-wrap">
+      <svg viewBox="0 0 64 64" width="72" height="72" fill="none">
+        <rect width="64" height="64" rx="18" fill="#1a73e8" />
+        <circle cx="32" cy="32" r="22" stroke="#ffffff" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="4 4" />
+        <circle cx="32" cy="32" r="14" fill="#f59e0b" />
+        <path d="M26 32l4 4 8-8" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </div>
+    <h1 class="splash-title">Chốt Điểm</h1>
+    <p class="splash-slogan">Chạm nhanh, tính chuẩn, vui trọn cuộc chơi.</p>
+    <div id="splash-loader" class="splash-loader-bar">
+      <div class="splash-loader-progress"></div>
+    </div>
+    <div id="splash-error-box" class="splash-error-box">
+      <div id="splash-error-text" class="splash-error-text">Không thể kết nối đến máy chủ.</div>
+      <button type="button" class="btn-splash-retry" onclick="bootstrapApp()">Thử Lại</button>
+    </div>
+  </div>
+
   <div class="app-shell">
     
     <!-- Top Fixed/Sticky Header -->
     <header class="app-header">
       <div class="app-header__title-group">
         <div class="app-header__logo">
-          <span>🎯</span>
-          <span>Chốt Điểm</span>
+          <svg viewBox="0 0 64 64" width="28" height="28" fill="none" style="vertical-align: middle;">
+            <rect width="64" height="64" rx="14" fill="#1a73e8" />
+            <circle cx="32" cy="32" r="12" fill="#f59e0b" />
+            <path d="M26 32l4 4 8-8" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span style="font-weight: 800; letter-spacing: -0.3px;">Chốt Điểm</span>
         </div>
-        <span id="session-badge" class="app-header__session-badge">Phiên chơi</span>
+        <span id="session-badge" class="app-header__session-badge" title="Chạm nhanh, tính chuẩn, vui trọn cuộc chơi.">Phiên chơi</span>
       </div>
       <div class="app-header__actions">
-        <button type="button" id="btn-refresh" class="icon-button" aria-label="Làm mới dữ liệu" title="Làm mới">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        </button>
+        <div class="top-bar__sync-wrap">
+          <span id="sync-time-label" class="sync-time-label" title="Thời gian đồng bộ gần nhất">Đồng bộ: --:--</span>
+          <button type="button" id="btn-refresh" class="icon-button" aria-label="Làm mới dữ liệu từ máy chủ" title="Làm mới" onclick="handleManualRefresh()">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -98,98 +129,126 @@
         </div>
       </section>
 
-      <!-- Screen 3: LỊCH SỬ (History) with Task 4.3 Filters -->
-      <section id="view-history" class="view" aria-label="Màn hình Lịch sử">
+      <!-- Screen 3: LỊCH SỬ VÁN (History & Filter) -->
+      <section id="view-history" class="view" aria-label="Màn hình Lịch sử ván">
         <div class="section-title">
           <span>Lịch Sử Ván Đấu</span>
+          <button type="button" id="btn-toggle-filter" class="btn-filter-toggle" onclick="toggleFilterPanel()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+            <span>Bộ lọc</span>
+            <span id="filter-active-count" class="filter-count-badge" style="display: none;">0</span>
+          </button>
         </div>
 
         <!-- Collapsible Filter Panel -->
-        <div class="filter-card">
-          <div class="filter-header" onclick="toggleFilterPanel()">
-            <div class="filter-header__title">
-              <span>🔍 Bộ lọc lịch sử</span>
-              <span id="filter-active-count" class="badge badge--leader" style="display: none;">0</span>
+        <div id="history-filter-panel" class="filter-card">
+          <div class="filter-row">
+            <div class="filter-col">
+              <label class="filter-label" for="filter-player">Người chơi</label>
+              <select id="filter-player" class="filter-select">
+                <option value="">-- Tất cả người chơi --</option>
+              </select>
             </div>
-            <span id="filter-arrow-icon" style="font-size: 0.85rem; color: var(--text-muted);">▼</span>
+            <div class="filter-col">
+              <label class="filter-label" for="filter-leader">Người cầm đầu</label>
+              <select id="filter-leader" class="filter-select">
+                <option value="">-- Tất cả A --</option>
+              </select>
+            </div>
           </div>
-          <div id="filter-body" class="filter-body">
-            <div class="filter-grid">
-              <div class="filter-group">
-                <label class="filter-label" for="filter-player">Người chơi:</label>
-                <select id="filter-player" class="filter-select">
-                  <option value="">-- Tất cả --</option>
-                </select>
-              </div>
-              <div class="filter-group">
-                <label class="filter-label" for="filter-leader">Người cầm đầu (A):</label>
-                <select id="filter-leader" class="filter-select">
-                  <option value="">-- Tất cả --</option>
-                </select>
-              </div>
-              <div class="filter-group">
-                <label class="filter-label" for="filter-result">Kết quả:</label>
-                <select id="filter-result" class="filter-select">
-                  <option value="ALL">Tất cả</option>
-                  <option value="WIN">Thắng (+)</option>
-                  <option value="DRAW">Hòa (0)</option>
-                  <option value="LOSE">Thua (-)</option>
-                </select>
-              </div>
-              <div class="filter-group">
-                <label class="filter-label" for="filter-status">Trạng thái ván:</label>
-                <select id="filter-status" class="filter-select">
-                  <option value="HOP_LE">Ván hợp lệ</option>
-                  <option value="ALL">Tất cả (cả đã hủy)</option>
-                  <option value="DA_CHINH_SUA">Đã chỉnh sửa</option>
-                  <option value="DA_HUY">Đã hủy</option>
-                </select>
-              </div>
-              <div class="filter-group">
-                <label class="filter-label" for="filter-from-game">Từ ván:</label>
-                <input type="number" id="filter-from-game" class="filter-select" min="1" placeholder="Số ván...">
-              </div>
-              <div class="filter-group">
-                <label class="filter-label" for="filter-to-game">Đến ván:</label>
-                <input type="number" id="filter-to-game" class="filter-select" min="1" placeholder="Số ván...">
+          <div class="filter-row">
+            <div class="filter-col">
+              <label class="filter-label" for="filter-result">Kết quả</label>
+              <select id="filter-result" class="filter-select">
+                <option value="ALL">Tất cả (Thắng/Hòa/Thua)</option>
+                <option value="WIN">Thắng (+)</option>
+                <option value="DRAW">Hòa (0)</option>
+                <option value="LOSE">Thua (-)</option>
+              </select>
+            </div>
+            <div class="filter-col">
+              <label class="filter-label" for="filter-status">Trạng thái ván</label>
+              <select id="filter-status" class="filter-select">
+                <option value="HOP_LE">Ván hợp lệ</option>
+                <option value="ALL">Tất cả trạng thái</option>
+                <option value="DA_CHINH_SUA">Đã chỉnh sửa</option>
+                <option value="DA_HUY">Đã hủy</option>
+              </select>
+            </div>
+          </div>
+          <div class="filter-row">
+            <div class="filter-col">
+              <label class="filter-label">Số ván (Từ - Đến)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="number" id="filter-from-game" class="filter-input" placeholder="Từ" min="1" style="width: 50%;">
+                <span>-</span>
+                <input type="number" id="filter-to-game" class="filter-input" placeholder="Đến" min="1" style="width: 50%;">
               </div>
             </div>
-            <div class="filter-actions">
-              <button type="button" class="icon-button" style="width: auto; height: 38px; padding: 0 12px; font-size: 0.85rem;" onclick="resetHistoryFilters()">Xóa lọc</button>
-              <button type="button" class="btn-secondary" style="min-height: 38px; padding: 0 16px; font-size: 0.85rem;" onclick="applyHistoryFilters()">Áp dụng</button>
-            </div>
+          </div>
+          <div class="filter-actions">
+            <button type="button" class="btn-clear-filter" onclick="clearHistoryFilters()">Xóa lọc</button>
+            <button type="button" class="btn-apply-filter" onclick="applyHistoryFilters()">Áp dụng</button>
           </div>
         </div>
 
         <div id="history-container">
-          <!-- Dynamic History List -->
+          <!-- Dynamic Game History Cards -->
         </div>
       </section>
 
-      <!-- Screen 4: NGƯỜI CHƠI (Players) -->
+      <!-- Screen 4: QUẢN LÝ NGƯỜI CHƠI (Players) -->
       <section id="view-players" class="view" aria-label="Màn hình Người chơi">
         <div class="section-title">
-          <span>Quản Lý Người Chơi</span>
+          <span>Danh Sách Người Chơi</span>
         </div>
-        <div id="players-container">
-          <!-- Dynamic Players Form & List -->
+        
+        <!-- Add Player Inline Bar -->
+        <div class="card" style="margin-bottom: 16px;">
+          <form id="form-add-player" onsubmit="handleAddPlayer(event)" style="display: flex; gap: 8px;">
+            <input type="text" id="input-new-player-name" class="bet-input" style="flex: 1; text-align: left; padding: 0 12px; font-size: 0.95rem;" placeholder="Nhập tên người chơi mới..." maxlength="50" required>
+            <button type="submit" class="btn-secondary" style="white-space: nowrap;">Thêm</button>
+          </form>
+        </div>
+
+        <div id="players-list-container">
+          <!-- Dynamic Players List -->
         </div>
       </section>
 
-      <!-- Screen 5: CÀI ĐẶT (Settings) -->
+      <!-- Screen 5: CÀI ĐẶT PHIÊN (Settings) -->
       <section id="view-settings" class="view" aria-label="Màn hình Cài đặt">
         <div class="section-title">
           <span>Cài Đặt Phiên Chơi</span>
         </div>
-        <div id="settings-container">
-          <!-- Dynamic Settings -->
+        
+        <div class="card" style="display: flex; flex-direction: column; gap: 16px;">
+          <div>
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">Ứng dụng</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted);">Chốt Điểm - Chạm nhanh, tính chuẩn, vui trọn cuộc chơi.</div>
+          </div>
+          <hr style="border: none; border-top: 1px solid var(--border-light);">
+          <div>
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">Tên Phiên Chơi</div>
+            <div id="setting-session-name" style="font-size: 0.95rem; color: var(--text-main); font-weight: 600;">--</div>
+          </div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">Mức Cược Mặc Định</div>
+            <div id="setting-default-bet" style="font-size: 0.95rem; color: var(--text-main); font-weight: 600;">5</div>
+          </div>
+          <hr style="border: none; border-top: 1px solid var(--border-light);">
+          <div>
+            <button type="button" class="btn-secondary" style="width: 100%; justify-content: center;" onclick="rebuildScoreboardManual()">
+              🔄 Tính lại toàn bộ bảng điểm
+            </button>
+          </div>
         </div>
       </section>
 
     </main>
 
-    <!-- Bottom Navigation Bar (Mobile First) -->
-    <nav class="app-nav" aria-label="Thanh điều hướng chính">
+    <!-- Bottom Navigation Bar (5 Tabs) -->
+    <nav class="app-nav" aria-label="Điều hướng chính">
       <div class="app-nav__container">
         <!-- 1. Bảng Điểm -->
         <button type="button" class="nav-item nav-item--active" data-view="scoreboard" aria-label="Bảng điểm">
@@ -254,7 +313,7 @@
         <!-- Dynamic Detail Content -->
       </div>
       <div id="modal-detail-footer" class="modal-footer">
-        <!-- Dynamic Action Buttons (Sửa, Hủy, Khôi phục, Đóng) -->
+        <!-- Dynamic Action Buttons -->
       </div>
     </div>
   </div>
@@ -289,6 +348,27 @@
       <div class="modal-footer">
         <button type="button" class="btn-secondary" style="background-color: var(--bg-subtle); color: var(--text-main);" onclick="closeConfirmModal()">Không</button>
         <button type="button" id="btn-confirm-action" class="btn-secondary" style="background-color: var(--color-danger);">Đồng ý</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 5: Modal Cảnh Báo Dữ Liệu Cũ (STALE_DATA Alert - Task 5.3) -->
+  <div id="modal-stale-data" class="modal-backdrop" onclick="if(event.target === this) closeStaleDataModal();">
+    <div class="modal-dialog" style="max-width: 440px; margin: auto; border-radius: var(--radius-lg);">
+      <div class="modal-header" style="border-bottom-color: var(--color-warning);">
+        <div class="modal-title" style="color: var(--color-warning-text);">
+          <span>⚠️</span>
+          <span>Dữ Liệu Đã Cũ</span>
+        </div>
+        <button type="button" class="icon-button" onclick="closeStaleDataModal()">✕</button>
+      </div>
+      <div class="modal-body" style="font-size: 0.95rem; line-height: 1.6;">
+        <p id="stale-data-message" style="margin-bottom: 12px;">Có ván mới được lưu từ thiết bị khác. Dữ liệu trên máy này đã cũ.</p>
+        <p style="font-size: 0.85rem; color: var(--color-text-muted);">Thông tin bạn vừa chọn trên ván mới vẫn được giữ nguyên. Vui lòng bấm <b>Làm mới & Tiếp tục</b> để đồng bộ số ván mới nhất trước khi chốt lại.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" style="background-color: var(--bg-subtle); color: var(--text-main);" onclick="closeStaleDataModal()">Đóng</button>
+        <button type="button" class="btn-secondary" style="background-color: var(--color-primary); color: #fff;" onclick="handleStaleDataRefresh()">Làm Mới & Tiếp Tục</button>
       </div>
     </div>
   </div>
