@@ -238,8 +238,17 @@
           </div>
           <hr style="border: none; border-top: 1px solid var(--border-light);">
           <div>
-            <button type="button" class="btn-secondary" style="width: 100%; justify-content: center;" onclick="rebuildScoreboardManual()">
+            <button type="button" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="rebuildScoreboardManual()">
               🔄 Tính lại toàn bộ bảng điểm
+            </button>
+            <button type="button" id="btn-export-csv" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="handleExportData('csv')">
+              📥 Xuất Dữ Liệu (CSV Excel)
+            </button>
+            <button type="button" id="btn-export-json" class="btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="handleExportData('json')">
+              📄 Xuất Dữ Liệu (JSON)
+            </button>
+            <button type="button" id="btn-health-check" class="btn-secondary" style="width: 100%; justify-content: center;" onclick="handleHealthCheck()">
+              🛡️ Kiểm Tra Sức Khỏe Hệ Thống
             </button>
           </div>
         </div>
