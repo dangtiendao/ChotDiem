@@ -1,18 +1,18 @@
 # Chốt Điểm - Web App Ghi Nhận & Tính Điểm Theo Ván
 
-Ứng dụng web ghi nhận và tính điểm nhanh theo từng ván cho các buổi chơi đối kháng nhiều người, sử dụng **Google Apps Script** làm backend và **Google Sheets** làm cơ sở dữ liệu.
+Ứng dụng web ghi nhận và tính điểm nhanh theo từng ván cho các buổi chơi đối kháng nhiều người, sử dụng **Google Apps Script** làm backend, **Google Sheets** làm cơ sở dữ liệu và **Mobile-First HTML5/CSS3 Web App** cho giao diện người dùng.
 
 ---
 
-## 🌟 Tính Năng Cốt Lõi (Phase 1 & Phase 2)
+## 🌟 Tính Năng Hoàn Chỉnh (Phase 1, 2 & 3)
 
-- **Mô hình Ván đấu linh hoạt:** Mỗi ván có 1 Người cầm đầu ($A$) và nhiều Người đối đầu ($opp$).
-- **Nguyên tắc bảo toàn điểm số (Zero-sum):** $\Delta_A + \sum \Delta_{opp} = 0$.
-- **Lưu trữ nguyên tử:** Mỗi ván đấu được lưu trên **đúng một dòng duy nhất** trong sheet `VAN_DAU`.
-- **Hỗ trợ số lượng người chơi thay đổi tự do:** Mảng chi tiết kết quả đối đầu được mã hóa dưới dạng chuỗi JSON trong cột `CHI_TIET_JSON`.
+- **Mobile-First Touch UI:** Giao diện tối ưu cho điện thoại di động, thao tác 1 chạm, vùng chạm lớn ($\ge 48\text{px}$), không cần mở bàn phím để chọn kết quả.
+- **5 Màn Hình Trực Quan:** Bảng điểm (xếp hạng, top 3), Ván mới (nhập 6 bước nhanh), Lịch sử ván, Quản lý người chơi, Cài đặt phiên.
+- **Mô hình Ván đấu Zero-Sum:** 1 Người cầm đầu ($A$) và nhiều Người đối đầu ($opp$). Tổng biến động toàn ván luôn triệt tiêu về 0: $\Delta_A + \sum \Delta_{opp} = 0$.
+- **Lưu trữ nguyên tử 1 ván = 1 dòng:** Mảng chi tiết kết quả đối đầu lưu trong cột `CHI_TIET_JSON` của sheet `VAN_DAU`.
 - **Cơ chế khóa đồng thời (LockService):** Chống xung đột dữ liệu khi nhiều người dùng cùng thao tác.
-- **Xếp hạng chuẩn thể thao (Competition Ranking):** Tính thứ hạng theo quy tắc `1, 2, 2, 4` với các tiêu chí phụ sắp xếp hiển thị.
-- **Xóa mềm (Soft delete):** Không xóa vật lý dữ liệu lịch sử (`NGUNG_CHOI`, `DA_HUY`).
+- **Xếp hạng thể thao (Competition Ranking):** Tính thứ hạng theo chuẩn `1, 2, 2, 4` với các tiêu chí phụ sắp xếp hiển thị.
+- **Xóa mềm an toàn (Soft delete):** Không bao giờ xóa vật lý dữ liệu lịch sử (`NGUNG_CHOI`, `DA_HUY`).
 
 ---
 
@@ -25,33 +25,39 @@
 ├── PlayerService.gs       # Quản lý người chơi (get, add, update, deactivate, reorder)
 ├── GameService.gs         # Nghiệp vụ ván đấu (save, history, update, cancel, restore)
 ├── SummaryService.gs      # Tổng kết và xếp hạng (getScoreboard, rebuildSummarySheet)
-├── Code.gs                # Điểm vào chính, setupApp(), getAppStatus(), Web App API
+├── Code.gs                # Điểm vào chính, setupApp(), getAppStatus(), include(), doGet()
 ├── Test.gs                # Bộ test thủ công trực tiếp trên Apps Script Console
+├── Index.html             # Layout chính Web App, View containers, Navigation
+├── Styles.html            # Toàn bộ CSS Mobile-First, Custom Properties, Themes
+├── Components.html        # Reusable SVG Icons Sprite & Component templates
+├── Scripts.html           # State management (appState), API Client Adapter, DOM logic
 ├── docs/
 │   ├── phase-1-business-and-data-design.md
-│   └── phase-2-backend-guide.md
+│   ├── phase-2-backend-guide.md
+│   └── phase-3-frontend-guide.md
 ├── src/                   # Core Pure logic modules (hỗ trợ test cục bộ)
 └── tests/
-    ├── phase1.test.js     # Test suite Phase 1 (21/21 tests passed)
-    └── phase2.test.js     # Test suite Phase 2 Mock Engine (18/18 tests passed)
+    ├── phase1.test.js     # Test suite Phase 1 Core (21/21 passed)
+    ├── phase2.test.js     # Test suite Phase 2 Backend Mock (18/18 passed)
+    └── phase3.test.js     # Test suite Phase 3 UI Structure (6/6 passed)
 ```
 
 ---
 
 ## 🚀 Hướng Dẫn Cài Đặt & Chạy Thử
 
-### 1. Kiểm thử cục bộ
+### 1. Chạy toàn bộ Unit Tests (45/45 tests)
 ```bash
 npm test
 ```
 
 ### 2. Triển khai lên Google Apps Script
-Chi tiết xem tại tài liệu: [docs/phase-2-backend-guide.md](docs/phase-2-backend-guide.md)
+Chi tiết xem tại tài liệu: [docs/phase-2-backend-guide.md](docs/phase-2-backend-guide.md) & [docs/phase-3-frontend-guide.md](docs/phase-3-frontend-guide.md)
 
 1. Mở Google Sheet > **Tiện ích mở rộng** > **Apps Script**.
-2. Sao chép toàn bộ các file `.gs` và `appsscript.json` vào dự án Apps Script.
+2. Sao chép toàn bộ các file `.gs`, `.html` và `appsscript.json` vào dự án Apps Script.
 3. Chạy hàm `setupApp()` để tự động tạo cấu trúc 4 Sheet: `CAU_HINH`, `NGUOI_CHOI`, `VAN_DAU`, `TONG_KET`.
-4. Chạy hàm `runPhase2Tests()` từ file `Test.gs` để kiểm thử toàn bộ backend.
+4. Bấm **Deploy** > **New deployment** > Chọn loại **Web app** > Cấp quyền truy cập để mở ứng dụng web trên điện thoại.
 
 ---
 

@@ -4,15 +4,17 @@
   "description": "Web App ghi nhận và tính điểm từng ván chơi (Google Apps Script & Google Sheets backend)",
   "main": "src/index.js",
   "scripts": {
-    "test": "node tests/phase1.test.js && node tests/phase2.test.js",
+    "test": "node tests/phase1.test.js && node tests/phase2.test.js && node tests/phase3.test.js",
     "test:phase1": "node tests/phase1.test.js",
-    "test:phase2": "node tests/phase2.test.js"
+    "test:phase2": "node tests/phase2.test.js",
+    "test:phase3": "node tests/phase3.test.js"
   },
   "keywords": [
     "google-apps-script",
     "scoring",
     "zero-sum",
-    "chot-diem"
+    "chot-diem",
+    "mobile-first"
   ],
   "author": "",
   "license": "MIT"

@@ -1,0 +1,1076 @@
+<script>
+/**
+ * ==========================================================================
+ * Scripts.html - Frontend Application Logic, State Management & API Adapter
+ * Google Apps Script Web App (Mobile First)
+ * ==========================================================================
+ */
+
+// Central Application State
+const appState = {
+  currentView: 'scoreboard',
+  session: {
+    appName: 'Chốt Điểm',
+    sessionId: '',
+    sessionName: 'Phiên chơi',
+    defaultBet: 5,
+    timezone: 'Asia/Ho_Chi_Minh',
+    schemaVersion: '1.0.0'
+  },
+  players: [],
+  scoreboard: [],
+  history: [],
+  newGame: {
+    leaderId: null,
+    defaultBet: 5,
+    customBets: {}, // { [playerId]: number }
+    results: {},    // { [playerId]: 'WIN' | 'DRAW' | 'LOSE' }
+    note: '',
+    editingBet: false,
+    editingCustomBetId: null
+  },
+  loading: {
+    app: true,
+    scoreboard: false,
+    newGame: false,
+    history: false,
+    players: false,
+    settings: false
+  },
+  isSubmitting: false,
+  errors: {}
+};
+
+// ==========================================================================
+// 1. API Client Adapter (Promise wrapper for google.script.run)
+// ==========================================================================
+const apiClient = {
+  /**
+   * Calls a server-side Apps Script function by name.
+   * @param {string} functionName - Function name on Apps Script backend
+   * @param {...any} args - Arguments to pass
+   * @returns {Promise<any>} Response data
+   */
+  call(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler((response) => {
+            if (response && response.ok === false) {
+              const err = new Error(response.error ? response.error.message : 'Đã xảy ra lỗi');
+              err.code = response.error ? response.error.code : 'UNKNOWN_ERROR';
+              err.details = response.error ? response.error.details : null;
+              reject(err);
+            } else {
+              resolve(response ? response.data : null);
+            }
+          })
+          .withFailureHandler((error) => {
+            console.error(`[API Error] ${functionName}:`, error);
+            const err = new Error(error.message || 'Lỗi kết nối máy chủ Google Apps Script');
+            err.code = 'NETWORK_ERROR';
+            reject(err);
+          })[functionName](...args);
+      } else {
+        // Standalone/Local testing fallback mock
+        console.warn(`[Mock API] google.script.run not available. Simulating: ${functionName}`);
+        setTimeout(() => {
+          resolve(mockApiResponse(functionName, args));
+        }, 300);
+      }
+    });
+  }
+};
+
+// Standalone Mock Fallback
+function mockApiResponse(fn, args) {
+  if (fn === 'getAppStatus') {
+    return { appName: 'Chốt Điểm (Mock)', sessionId: 'CP-LOCAL', sessionName: 'Phiên Cục Bộ', defaultBet: 5 };
+  }
+  if (fn === 'getPlayers') {
+    return [
+      { playerId: 'P001', name: 'An Nguyễn', order: 1, active: true, status: 'DANG_CHOI' },
+      { playerId: 'P002', name: 'Bình Trần', order: 2, active: true, status: 'DANG_CHOI' },
+      { playerId: 'P003', name: 'Cường Lê', order: 3, active: true, status: 'DANG_CHOI' },
+      { playerId: 'P004', name: 'Dũng Phạm', order: 4, active: true, status: 'DANG_CHOI' }
+    ];
+  }
+  if (fn === 'getScoreboard') {
+    return [
+      { rank: 1, playerId: 'P001', name: 'An Nguyễn', active: true, totalScore: 15, wins: 3, draws: 1, losses: 1, leaderCount: 2, gamesPlayed: 5 },
+      { rank: 2, playerId: 'P002', name: 'Bình Trần', active: true, totalScore: 5, wins: 2, draws: 2, losses: 1, leaderCount: 1, gamesPlayed: 5 },
+      { rank: 3, playerId: 'P003', name: 'Cường Lê', active: true, totalScore: -5, wins: 1, draws: 1, losses: 3, leaderCount: 1, gamesPlayed: 5 },
+      { rank: 4, playerId: 'P004', name: 'Dũng Phạm', active: true, totalScore: -15, wins: 0, draws: 2, losses: 3, leaderCount: 1, gamesPlayed: 5 }
+    ];
+  }
+  if (fn === 'getGameHistory') {
+    return [
+      {
+        gameId: 'V000001', gameNumber: 1, playedAt: new Date().toISOString(),
+        leaderId: 'P001', leaderName: 'An Nguyễn', defaultBet: 5, leaderDelta: 15, transactionTotal: 15,
+        details: [
+          { playerId: 'P002', name: 'Bình Trần', result: 'LOSE', bet: 5, delta: -5 },
+          { playerId: 'P003', name: 'Cường Lê', result: 'LOSE', bet: 5, delta: -5 },
+          { playerId: 'P004', name: 'Dũng Phạm', result: 'LOSE', bet: 5, delta: -5 }
+        ],
+        status: 'HOP_LE'
+      }
+    ];
+  }
+  if (fn === 'saveGame') {
+    return {
+      game: { gameId: 'V000002', gameNumber: 2, playedAt: new Date().toISOString(), leaderDelta: 0, status: 'HOP_LE' },
+      scoreboard: []
+    };
+  }
+  if (fn === 'addPlayer') {
+    return { playerId: 'P005', name: args[0], order: 5, active: true, status: 'DANG_CHOI' };
+  }
+  return {};
+}
+
+// ==========================================================================
+// 2. Navigation & View Routing
+// ==========================================================================
+function navigateTo(viewName) {
+  if (!['scoreboard', 'new-game', 'history', 'players', 'settings'].includes(viewName)) {
+    viewName = 'scoreboard';
+  }
+
+  appState.currentView = viewName;
+
+  // Toggle View Containers
+  document.querySelectorAll('.view').forEach((el) => {
+    el.classList.remove('view--active');
+  });
+  const targetView = document.getElementById(`view-${viewName}`);
+  if (targetView) {
+    targetView.classList.add('view--active');
+  }
+
+  // Update Nav Items
+  document.querySelectorAll('.nav-item').forEach((el) => {
+    el.classList.remove('nav-item--active');
+    if (el.dataset.view === viewName) {
+      el.classList.add('nav-item--active');
+    }
+  });
+
+  // Render view-specific content
+  if (viewName === 'scoreboard') {
+    renderScoreboardView();
+  } else if (viewName === 'new-game') {
+    renderNewGameView();
+  } else if (viewName === 'history') {
+    loadHistory();
+  } else if (viewName === 'players') {
+    renderPlayersView();
+  } else if (viewName === 'settings') {
+    renderSettingsView();
+  }
+
+  // Scroll to top of main area
+  const mainEl = document.querySelector('.app-main');
+  if (mainEl) mainEl.scrollTop = 0;
+}
+
+// ==========================================================================
+// 3. Scoreboard Screen (Screen 1)
+// ==========================================================================
+function loadScoreboard() {
+  appState.loading.scoreboard = true;
+  renderScoreboardView();
+
+  apiClient.call('getScoreboard')
+    .then((data) => {
+      appState.scoreboard = Array.isArray(data) ? data : [];
+      appState.errors.scoreboard = null;
+    })
+    .catch((err) => {
+      console.error('Error loading scoreboard:', err);
+      appState.errors.scoreboard = err.message;
+    })
+    .finally(() => {
+      appState.loading.scoreboard = false;
+      renderScoreboardView();
+    });
+}
+
+function renderScoreboardView() {
+  const container = document.getElementById('scoreboard-container');
+  if (!container) return;
+
+  // Clear previous content
+  container.innerHTML = '';
+
+  if (appState.loading.scoreboard) {
+    container.innerHTML = `
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <p>Đang tải bảng điểm...</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (appState.errors.scoreboard) {
+    container.innerHTML = `
+      <div class="error-state">
+        <p style="font-weight: 700; margin-bottom: 8px;">Không thể tải bảng điểm</p>
+        <p style="font-size: 0.9rem; margin-bottom: 12px;">${escapeHtml(appState.errors.scoreboard)}</p>
+        <button class="btn-secondary" onclick="loadScoreboard()">Thử lại</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (!appState.scoreboard || appState.scoreboard.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🏆</div>
+        <h3 class="empty-state__title">Chưa có dữ liệu bảng điểm</h3>
+        <p style="font-size: 0.9rem; margin-bottom: 16px;">Hãy thêm người chơi và bắt đầu ván đấu đầu tiên.</p>
+        <button class="btn-secondary" onclick="navigateTo('players')">+ Thêm người chơi</button>
+      </div>
+    `;
+    return;
+  }
+
+  const listEl = document.createElement('div');
+  listEl.className = 'scoreboard-list';
+
+  appState.scoreboard.forEach((item) => {
+    const card = document.createElement('div');
+    card.className = `score-card ${item.rank === 1 ? 'score-card--rank-1' : item.rank === 2 ? 'score-card--rank-2' : item.rank === 3 ? 'score-card--rank-3' : ''}`;
+
+    const rankEl = document.createElement('div');
+    rankEl.className = 'score-card__rank';
+    rankEl.textContent = String(item.rank);
+
+    const infoEl = document.createElement('div');
+    infoEl.className = 'score-card__info';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'score-card__name';
+    nameEl.textContent = item.name;
+
+    if (!item.active) {
+      const inactiveBadge = document.createElement('span');
+      inactiveBadge.className = 'badge badge--inactive';
+      inactiveBadge.textContent = 'Nghỉ';
+      nameEl.appendChild(inactiveBadge);
+    }
+
+    if (item.playerId === appState.newGame.leaderId) {
+      const leaderBadge = document.createElement('span');
+      leaderBadge.className = 'badge badge--leader';
+      leaderBadge.textContent = 'A Cầm đầu';
+      nameEl.appendChild(leaderBadge);
+    }
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'score-card__meta';
+    metaEl.textContent = `${item.gamesPlayed || 0} ván (${item.wins || 0}T - ${item.draws || 0}H - ${item.losses || 0}B | ${item.leaderCount || 0}A)`;
+
+    infoEl.appendChild(nameEl);
+    infoEl.appendChild(metaEl);
+
+    const scoreGroup = document.createElement('div');
+    scoreGroup.className = 'score-card__score-group';
+
+    const totalEl = document.createElement('div');
+    const score = Number(item.totalScore) || 0;
+    totalEl.className = `score-card__total ${score > 0 ? 'score-card__total--positive' : score < 0 ? 'score-card__total--negative' : 'score-card__total--zero'}`;
+    totalEl.textContent = score > 0 ? `+${score}` : `${score}`;
+
+    scoreGroup.appendChild(totalEl);
+
+    card.appendChild(rankEl);
+    card.appendChild(infoEl);
+    card.appendChild(scoreGroup);
+
+    listEl.appendChild(card);
+  });
+
+  container.appendChild(listEl);
+}
+
+// ==========================================================================
+// 4. New Game Screen (Screen 2) - 6 Steps Workflow
+// ==========================================================================
+function renderNewGameView() {
+  const activePlayers = (appState.players || []).filter((p) => p.active);
+
+  // Auto-select first active player as Leader if none selected
+  if (!appState.newGame.leaderId && activePlayers.length > 0) {
+    appState.newGame.leaderId = activePlayers[0].playerId;
+  }
+
+  renderStep1Leader(activePlayers);
+  renderStep2DefaultBet();
+  renderStep3Opponents(activePlayers);
+  renderStep5Preview(activePlayers);
+  renderStep6SubmitButton();
+}
+
+// Step 1: Leader Selection
+function renderStep1Leader(activePlayers) {
+  const container = document.getElementById('step-leader-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (activePlayers.length < 2) {
+    container.innerHTML = `
+      <p style="font-size: 0.9rem; color: var(--color-danger); padding: 8px 0;">
+        Cần tối thiểu 2 người chơi để tạo ván đấu. Vui lòng thêm người chơi trước.
+      </p>
+    `;
+    return;
+  }
+
+  activePlayers.forEach((player) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `leader-chip ${player.playerId === appState.newGame.leaderId ? 'leader-chip--selected' : ''}`;
+    chip.textContent = player.name;
+
+    chip.addEventListener('click', () => {
+      appState.newGame.leaderId = player.playerId;
+      // Re-render New Game view upon leader change
+      renderNewGameView();
+    });
+
+    container.appendChild(chip);
+  });
+}
+
+// Step 2: Default Bet Editor
+function renderStep2DefaultBet() {
+  const container = document.getElementById('step-default-bet-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const bar = document.createElement('div');
+  bar.className = 'default-bet-bar';
+
+  if (appState.newGame.editingBet) {
+    bar.innerHTML = `
+      <span style="font-weight: 600;">Sửa mức cược:</span>
+      <div class="inline-input-group">
+        <input type="number" id="input-default-bet" class="input-number" inputmode="numeric" min="0" value="${appState.newGame.defaultBet}">
+        <button type="button" class="icon-button" style="color: var(--color-success);" onclick="saveDefaultBet()" title="Lưu">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </button>
+        <button type="button" class="icon-button" style="color: var(--color-danger);" onclick="cancelEditDefaultBet()" title="Hủy">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    `;
+  } else {
+    bar.innerHTML = `
+      <div class="bet-display">
+        <span>Mức cược chung:</span>
+        <span class="bet-amount">${appState.newGame.defaultBet}</span>
+      </div>
+      <button type="button" class="btn-secondary" style="min-height: 36px; padding: 0 12px; font-size: 0.85rem;" onclick="startEditDefaultBet()">Sửa cược</button>
+    `;
+  }
+
+  container.appendChild(bar);
+}
+
+function startEditDefaultBet() {
+  appState.newGame.editingBet = true;
+  renderStep2DefaultBet();
+  const input = document.getElementById('input-default-bet');
+  if (input) {
+    input.focus();
+    input.select();
+  }
+}
+
+function cancelEditDefaultBet() {
+  appState.newGame.editingBet = false;
+  renderStep2DefaultBet();
+}
+
+function saveDefaultBet() {
+  const input = document.getElementById('input-default-bet');
+  if (!input) return;
+  const val = parseInt(input.value, 10);
+  if (isNaN(val) || val < 0) {
+    showToast('Mức cược phải là số nguyên lớn hơn hoặc bằng 0', 'error');
+    return;
+  }
+  appState.newGame.defaultBet = val;
+  appState.newGame.editingBet = false;
+  renderNewGameView();
+}
+
+// Step 3 & 4: Opponent Cards with Fast Buttons (+ / 0 / -) and Custom Bet
+function renderStep3Opponents(activePlayers) {
+  const container = document.getElementById('step-opponents-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const opponents = activePlayers.filter((p) => p.playerId !== appState.newGame.leaderId);
+
+  if (opponents.length === 0) {
+    container.innerHTML = '<p class="empty-state">Chưa có người đối đầu.</p>';
+    return;
+  }
+
+  opponents.forEach((opp) => {
+    const card = document.createElement('div');
+    const currentResult = appState.newGame.results[opp.playerId] || null;
+    const effectiveBet = appState.newGame.customBets[opp.playerId] !== undefined
+      ? appState.newGame.customBets[opp.playerId]
+      : appState.newGame.defaultBet;
+
+    // Delta calculation
+    let delta = 0;
+    if (currentResult === 'WIN') delta = effectiveBet;
+    else if (currentResult === 'LOSE') delta = -effectiveBet;
+
+    card.className = `opp-card ${currentResult === 'WIN' ? 'opp-card--win' : currentResult === 'LOSE' ? 'opp-card--lose' : currentResult === 'DRAW' ? 'opp-card--draw' : ''}`;
+
+    // Card Header: Name & Delta
+    const headerEl = document.createElement('div');
+    headerEl.className = 'opp-card__header';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'opp-card__name';
+    nameEl.textContent = opp.name;
+
+    const deltaEl = document.createElement('div');
+    deltaEl.className = `opp-card__delta ${delta > 0 ? 'opp-card__delta--pos' : delta < 0 ? 'opp-card__delta--neg' : 'opp-card__delta--zero'}`;
+    deltaEl.textContent = delta > 0 ? `+${delta}` : `${delta}`;
+
+    headerEl.appendChild(nameEl);
+    headerEl.appendChild(deltaEl);
+
+    // 3 Quick Action Buttons
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'quick-buttons-group';
+
+    // Button WIN (+ Thắng)
+    const btnWin = document.createElement('button');
+    btnWin.type = 'button';
+    btnWin.className = 'btn-result btn-result--win';
+    btnWin.setAttribute('aria-pressed', currentResult === 'WIN' ? 'true' : 'false');
+    btnWin.innerHTML = `+ Thắng (${effectiveBet})`;
+    btnWin.addEventListener('click', () => {
+      appState.newGame.results[opp.playerId] = 'WIN';
+      renderStep3Opponents(activePlayers);
+      renderStep5Preview(activePlayers);
+      renderStep6SubmitButton();
+    });
+
+    // Button DRAW (0 Hòa)
+    const btnDraw = document.createElement('button');
+    btnDraw.type = 'button';
+    btnDraw.className = 'btn-result btn-result--draw';
+    btnDraw.setAttribute('aria-pressed', currentResult === 'DRAW' ? 'true' : 'false');
+    btnDraw.innerHTML = '0 Hòa';
+    btnDraw.addEventListener('click', () => {
+      appState.newGame.results[opp.playerId] = 'DRAW';
+      renderStep3Opponents(activePlayers);
+      renderStep5Preview(activePlayers);
+      renderStep6SubmitButton();
+    });
+
+    // Button LOSE (- Thua)
+    const btnLose = document.createElement('button');
+    btnLose.type = 'button';
+    btnLose.className = 'btn-result btn-result--lose';
+    btnLose.setAttribute('aria-pressed', currentResult === 'LOSE' ? 'true' : 'false');
+    btnLose.innerHTML = `- Thua (${effectiveBet})`;
+    btnLose.addEventListener('click', () => {
+      appState.newGame.results[opp.playerId] = 'LOSE';
+      renderStep3Opponents(activePlayers);
+      renderStep5Preview(activePlayers);
+      renderStep6SubmitButton();
+    });
+
+    btnGroup.appendChild(btnWin);
+    btnGroup.appendChild(btnDraw);
+    btnGroup.appendChild(btnLose);
+
+    // Custom Bet Section
+    const customBetEl = document.createElement('div');
+    customBetEl.className = 'opp-card__custom-bet';
+
+    const isEditingThisBet = appState.newGame.editingCustomBetId === opp.playerId;
+
+    if (isEditingThisBet) {
+      customBetEl.innerHTML = `
+        <span style="font-weight: 600;">Cược riêng:</span>
+        <div class="inline-input-group">
+          <input type="number" id="input-custom-bet-${opp.playerId}" class="input-number" inputmode="numeric" min="0" value="${effectiveBet}">
+          <button type="button" class="icon-button" style="color: var(--color-success);" onclick="saveCustomBet('${opp.playerId}')">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </button>
+          <button type="button" class="icon-button" style="color: var(--color-danger);" onclick="cancelEditCustomBet()">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      `;
+    } else {
+      const hasCustom = appState.newGame.customBets[opp.playerId] !== undefined;
+      customBetEl.innerHTML = `
+        <span>Cược: <strong>${effectiveBet}</strong> ${hasCustom ? '<em style="color: var(--color-primary);">(Riêng)</em>' : '(Chung)'}</span>
+        <div>
+          ${hasCustom ? `<button type="button" style="font-size: 0.75rem; color: var(--color-danger); margin-right: 8px;" onclick="resetCustomBet('${opp.playerId}')">Đặt lại cược chung</button>` : ''}
+          <button type="button" style="font-size: 0.8rem; color: var(--color-primary); font-weight: 600;" onclick="startEditCustomBet('${opp.playerId}')">Sửa cược</button>
+        </div>
+      `;
+    }
+
+    card.appendChild(headerEl);
+    card.appendChild(btnGroup);
+    card.appendChild(customBetEl);
+
+    container.appendChild(card);
+  });
+}
+
+function startEditCustomBet(playerId) {
+  appState.newGame.editingCustomBetId = playerId;
+  renderNewGameView();
+  const input = document.getElementById(`input-custom-bet-${playerId}`);
+  if (input) {
+    input.focus();
+    input.select();
+  }
+}
+
+function cancelEditCustomBet() {
+  appState.newGame.editingCustomBetId = null;
+  renderNewGameView();
+}
+
+function saveCustomBet(playerId) {
+  const input = document.getElementById(`input-custom-bet-${playerId}`);
+  if (!input) return;
+  const val = parseInt(input.value, 10);
+  if (isNaN(val) || val < 0) {
+    showToast('Mức cược phải là số nguyên >= 0', 'error');
+    return;
+  }
+  appState.newGame.customBets[playerId] = val;
+  appState.newGame.editingCustomBetId = null;
+  renderNewGameView();
+}
+
+function resetCustomBet(playerId) {
+  delete appState.newGame.customBets[playerId];
+  renderNewGameView();
+}
+
+// Step 5: Summary Preview Bar
+function renderStep5Preview(activePlayers) {
+  const container = document.getElementById('step-preview-container');
+  if (!container) return;
+
+  const opponents = activePlayers.filter((p) => p.playerId !== appState.newGame.leaderId);
+  const leader = activePlayers.find((p) => p.playerId === appState.newGame.leaderId);
+
+  let opponentsSumDelta = 0;
+  let chosenCount = 0;
+
+  opponents.forEach((opp) => {
+    const res = appState.newGame.results[opp.playerId];
+    const bet = appState.newGame.customBets[opp.playerId] !== undefined
+      ? appState.newGame.customBets[opp.playerId]
+      : appState.newGame.defaultBet;
+
+    if (res) {
+      chosenCount++;
+      if (res === 'WIN') opponentsSumDelta += bet;
+      else if (res === 'LOSE') opponentsSumDelta -= bet;
+    }
+  });
+
+  const leaderDelta = -opponentsSumDelta;
+  const totalDelta = leaderDelta + opponentsSumDelta;
+  const unchosenCount = opponents.length - chosenCount;
+
+  container.innerHTML = `
+    <div class="preview-card">
+      <div class="preview-grid">
+        <div class="preview-item">
+          <div class="preview-label">Điểm của A (${escapeHtml(leader ? leader.name : 'Người cầm đầu')}):</div>
+          <div class="preview-value" style="color: ${leaderDelta > 0 ? '#46e37b' : leaderDelta < 0 ? '#ff8080' : '#ffffff'};">
+            ${leaderDelta > 0 ? `+${leaderDelta}` : `${leaderDelta}`}
+          </div>
+        </div>
+        <div class="preview-item">
+          <div class="preview-label">Tổng delta toàn ván:</div>
+          <div class="preview-value" style="color: ${totalDelta === 0 ? '#ffffff' : '#ff8080'};">
+            ${totalDelta}
+          </div>
+        </div>
+      </div>
+      ${unchosenCount > 0 ? `
+        <div class="preview-warning">
+          <span>⚠️ Có ${unchosenCount} người chưa chọn kết quả (sẽ mặc định tính là Hòa 0đ)</span>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// Step 6: Submit "Chốt Ván" Button
+function renderStep6SubmitButton() {
+  const btn = document.getElementById('btn-submit-game');
+  if (!btn) return;
+
+  const activePlayers = (appState.players || []).filter((p) => p.active);
+  const hasLeader = !!appState.newGame.leaderId;
+  const hasOpponents = activePlayers.length >= 2;
+
+  btn.disabled = appState.isSubmitting || !hasLeader || !hasOpponents;
+  btn.innerHTML = appState.isSubmitting
+    ? '<span class="spinner"></span> Đang chốt ván...'
+    : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Chốt Ván Đấu';
+}
+
+// Submit Game Action
+function submitGame() {
+  if (appState.isSubmitting) return;
+
+  const activePlayers = (appState.players || []).filter((p) => p.active);
+  if (!appState.newGame.leaderId) {
+    showToast('Vui lòng chọn người cầm đầu (A)', 'error');
+    return;
+  }
+
+  const opponents = activePlayers.filter((p) => p.playerId !== appState.newGame.leaderId);
+  if (opponents.length === 0) {
+    showToast('Cần ít nhất 1 người đối đầu để tạo ván', 'error');
+    return;
+  }
+
+  // Construct payload
+  const opponentPayloads = opponents.map((opp) => {
+    const res = appState.newGame.results[opp.playerId] || 'DRAW';
+    const bet = appState.newGame.customBets[opp.playerId] !== undefined
+      ? appState.newGame.customBets[opp.playerId]
+      : appState.newGame.defaultBet;
+
+    return {
+      playerId: opp.playerId,
+      result: res,
+      bet: bet
+    };
+  });
+
+  const payload = {
+    leaderId: appState.newGame.leaderId,
+    defaultBet: appState.newGame.defaultBet,
+    opponents: opponentPayloads,
+    note: appState.newGame.note || '',
+    playedAt: new Date().toISOString()
+  };
+
+  appState.isSubmitting = true;
+  renderStep6SubmitButton();
+
+  apiClient.call('saveGame', payload)
+    .then((result) => {
+      showToast(`Đã chốt ván đấu #${result && result.game ? result.game.gameNumber : ''} thành công!`, 'success');
+
+      // Reset newGame state for next round (preserve leader & defaultBet)
+      appState.newGame.results = {};
+      appState.newGame.customBets = {};
+      appState.newGame.note = '';
+
+      // Update scoreboard if returned
+      if (result && Array.isArray(result.scoreboard)) {
+        appState.scoreboard = result.scoreboard;
+      }
+
+      // Navigate to scoreboard to review
+      navigateTo('scoreboard');
+    })
+    .catch((err) => {
+      console.error('Error saving game:', err);
+      showToast(`Lỗi chốt ván: ${err.message}`, 'error');
+    })
+    .finally(() => {
+      appState.isSubmitting = false;
+      renderStep6SubmitButton();
+    });
+}
+
+// ==========================================================================
+// 5. History Screen (Screen 3)
+// ==========================================================================
+function loadHistory() {
+  appState.loading.history = true;
+  renderHistoryView();
+
+  apiClient.call('getGameHistory', { includeCancelled: true, limit: 50 })
+    .then((data) => {
+      appState.history = Array.isArray(data) ? data : [];
+      appState.errors.history = null;
+    })
+    .catch((err) => {
+      console.error('Error loading history:', err);
+      appState.errors.history = err.message;
+    })
+    .finally(() => {
+      appState.loading.history = false;
+      renderHistoryView();
+    });
+}
+
+function renderHistoryView() {
+  const container = document.getElementById('history-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (appState.loading.history) {
+    container.innerHTML = `
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <p>Đang tải lịch sử ván đấu...</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (appState.errors.history) {
+    container.innerHTML = `
+      <div class="error-state">
+        <p style="font-weight: 700; margin-bottom: 8px;">Không thể tải lịch sử</p>
+        <p style="font-size: 0.9rem; margin-bottom: 12px;">${escapeHtml(appState.errors.history)}</p>
+        <button class="btn-secondary" onclick="loadHistory()">Thử lại</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (!appState.history || appState.history.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">📜</div>
+        <h3 class="empty-state__title">Chưa có ván đấu nào</h3>
+        <p style="font-size: 0.9rem; margin-bottom: 16px;">Lịch sử các ván đấu sẽ xuất hiện tại đây.</p>
+        <button class="btn-secondary" onclick="navigateTo('new-game')">Tạo ván đầu tiên</button>
+      </div>
+    `;
+    return;
+  }
+
+  const listEl = document.createElement('div');
+  listEl.className = 'history-list';
+
+  appState.history.forEach((round) => {
+    const card = document.createElement('div');
+    const isCancelled = round.status === 'DA_HUY';
+    card.className = `history-card ${isCancelled ? 'history-card--cancelled' : ''}`;
+
+    const dateStr = round.playedAt ? new Date(round.playedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    card.innerHTML = `
+      <div class="history-card__header">
+        <span class="history-card__num">Ván #${round.gameNumber || round.SO_VAN || ''} ${isCancelled ? '<span class="badge badge--inactive" style="color: var(--color-danger);">ĐÃ HỦY</span>' : ''}</span>
+        <span class="history-card__time">${dateStr}</span>
+      </div>
+      <div class="history-card__leader">
+        Cầm đầu: <strong>${escapeHtml(round.leaderName || round.TEN_NGUOI_CAM_DAU || round.leaderId)}</strong>
+        <span style="color: ${round.leaderDelta > 0 ? 'var(--color-success)' : round.leaderDelta < 0 ? 'var(--color-danger)' : 'var(--text-muted)'}; font-weight: 800; margin-left: 6px;">
+          (${round.leaderDelta > 0 ? `+${round.leaderDelta}` : `${round.leaderDelta}`})
+        </span>
+      </div>
+      <div class="history-card__details">
+        ${Array.isArray(round.details) ? round.details.map((d) => `
+          <span class="history-tag history-tag--${(d.result || '').toLowerCase()}">
+            ${escapeHtml(d.name || d.playerId)}: ${d.result === 'WIN' ? '+'+d.delta : d.delta}
+          </span>
+        `).join('') : ''}
+      </div>
+    `;
+
+    listEl.appendChild(card);
+  });
+
+  container.appendChild(listEl);
+}
+
+// ==========================================================================
+// 6. Players Screen (Screen 4)
+// ==========================================================================
+function loadPlayers() {
+  appState.loading.players = true;
+  renderPlayersView();
+
+  apiClient.call('getPlayers', true) // Include inactive
+    .then((data) => {
+      appState.players = Array.isArray(data) ? data : [];
+      appState.errors.players = null;
+    })
+    .catch((err) => {
+      console.error('Error loading players:', err);
+      appState.errors.players = err.message;
+    })
+    .finally(() => {
+      appState.loading.players = false;
+      renderPlayersView();
+    });
+}
+
+function renderPlayersView() {
+  const container = document.getElementById('players-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Add Player Form
+  const formCard = document.createElement('div');
+  formCard.className = 'card';
+  formCard.innerHTML = `
+    <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 10px;">Thêm người chơi mới</h3>
+    <form class="form-add-player" onsubmit="event.preventDefault(); handleAddPlayer();">
+      <input type="text" id="input-player-name" class="input-text" placeholder="Nhập tên người chơi..." maxlength="50" autocomplete="off">
+      <button type="submit" id="btn-add-player" class="btn-secondary">+ Thêm</button>
+    </form>
+  `;
+  container.appendChild(formCard);
+
+  // Player List
+  const listCard = document.createElement('div');
+  listCard.className = 'card';
+  listCard.innerHTML = '<h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 12px;">Danh sách người chơi</h3>';
+
+  if (appState.loading.players) {
+    listCard.innerHTML += `
+      <div class="loading-container" style="padding: 20px 0;">
+        <div class="spinner"></div>
+      </div>
+    `;
+  } else if (!appState.players || appState.players.length === 0) {
+    listCard.innerHTML += '<p class="empty-state">Chưa có người chơi nào.</p>';
+  } else {
+    const listWrapper = document.createElement('div');
+    appState.players.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'player-item';
+      item.innerHTML = `
+        <div>
+          <strong>${escapeHtml(p.name)}</strong>
+          <span style="font-size: 0.75rem; color: var(--text-muted); margin-left: 6px;">(${p.playerId})</span>
+          ${!p.active ? '<span class="badge badge--inactive" style="margin-left: 6px;">Đã nghỉ</span>' : ''}
+        </div>
+        <div>
+          ${p.active ? `
+            <button type="button" style="font-size: 0.8rem; color: var(--color-danger); font-weight: 600;" onclick="handleDeactivatePlayer('${p.playerId}')">Nghỉ chơi</button>
+          ` : `
+            <span style="font-size: 0.8rem; color: var(--text-subtle);">Đã ngừng</span>
+          `}
+        </div>
+      `;
+      listWrapper.appendChild(item);
+    });
+    listCard.appendChild(listWrapper);
+  }
+
+  container.appendChild(listCard);
+}
+
+function handleAddPlayer() {
+  const input = document.getElementById('input-player-name');
+  if (!input) return;
+  const name = input.value.trim();
+  if (!name) {
+    showToast('Vui lòng nhập tên người chơi', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-add-player');
+  if (btn) btn.disabled = true;
+
+  apiClient.call('addPlayer', name)
+    .then((newPlayer) => {
+      showToast(`Đã thêm người chơi '${name}'!`, 'success');
+      input.value = '';
+      loadPlayers();
+      loadScoreboard();
+    })
+    .catch((err) => {
+      showToast(err.message, 'error');
+    })
+    .finally(() => {
+      if (btn) btn.disabled = false;
+    });
+}
+
+function handleDeactivatePlayer(playerId) {
+  if (!confirm('Bạn có chắc chắn muốn đánh dấu người chơi này nghỉ chơi? (Lịch sử điểm số vẫn được giữ nguyên)')) {
+    return;
+  }
+
+  apiClient.call('deactivatePlayer', playerId)
+    .then(() => {
+      showToast('Đã cập nhật trạng thái người chơi', 'success');
+      loadPlayers();
+      loadScoreboard();
+    })
+    .catch((err) => {
+      showToast(err.message, 'error');
+    });
+}
+
+// ==========================================================================
+// 7. Settings Screen (Screen 5)
+// ==========================================================================
+function renderSettingsView() {
+  const container = document.getElementById('settings-container');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="card">
+      <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 12px;">Thông tin phiên chơi</h3>
+      <div class="settings-group">
+        <div class="setting-row">
+          <span class="setting-label">Tên ứng dụng:</span>
+          <span class="setting-value">${escapeHtml(appState.session.appName)}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Mã phiên:</span>
+          <span class="setting-value">${escapeHtml(appState.session.sessionId || 'Chưa thiết lập')}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Tên buổi chơi:</span>
+          <span class="setting-value">${escapeHtml(appState.session.sessionName || 'Phiên chơi')}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Mức cược mặc định:</span>
+          <span class="setting-value"><strong>${appState.session.defaultBet}</strong> điểm</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Múi giờ:</span>
+          <span class="setting-value">${escapeHtml(appState.session.timezone)}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Phiên bản:</span>
+          <span class="setting-value">${escapeHtml(appState.session.schemaVersion)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 12px;">Bảo trì & Quản trị</h3>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
+        Đồng bộ lại toàn bộ dữ liệu bảng tổng kết từ các ván đấu lịch sử.
+      </p>
+      <button type="button" class="btn-secondary" style="width: 100%;" onclick="handleRebuildSummary()">
+        🔄 Đồng bộ lại Bảng Tổng Kết
+      </button>
+    </div>
+  `;
+}
+
+function handleRebuildSummary() {
+  showToast('Đang đồng bộ dữ liệu...', 'info');
+  apiClient.call('rebuildSummarySheet')
+    .then(() => {
+      showToast('Đã đồng bộ lại Bảng tổng kết thành công!', 'success');
+      loadScoreboard();
+    })
+    .catch((err) => {
+      showToast(`Lỗi đồng bộ: ${err.message}`, 'error');
+    });
+}
+
+// ==========================================================================
+// 8. Toast Notification System (aria-live)
+// ==========================================================================
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast--${type}`;
+  toast.setAttribute('role', 'alert');
+  toast.textContent = message;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-10px)';
+    toast.style.transition = 'all 0.3s ease';
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  }, duration);
+}
+
+// Utility: HTML Escaping
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ==========================================================================
+// 9. Application Bootstrap & Initialization
+// ==========================================================================
+function initApp() {
+  // Bind Bottom Navigation
+  document.querySelectorAll('.nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+      if (view) navigateTo(view);
+    });
+  });
+
+  // Bind Header Refresh
+  const btnRefresh = document.getElementById('btn-refresh');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => {
+      showToast('Đang làm mới dữ liệu...', 'info');
+      loadInitialData();
+    });
+  }
+
+  // Load initial backend session status and data
+  loadInitialData();
+}
+
+function loadInitialData() {
+  Promise.allSettled([
+    apiClient.call('getAppStatus'),
+    apiClient.call('getPlayers', true),
+    apiClient.call('getScoreboard')
+  ]).then(([statusRes, playersRes, scoreRes]) => {
+    if (statusRes.status === 'fulfilled' && statusRes.value) {
+      Object.assign(appState.session, statusRes.value);
+      if (statusRes.value.defaultBet) {
+        appState.newGame.defaultBet = statusRes.value.defaultBet;
+      }
+      const badge = document.getElementById('session-badge');
+      if (badge) badge.textContent = appState.session.sessionName || 'Chốt Điểm';
+    }
+
+    if (playersRes.status === 'fulfilled' && Array.isArray(playersRes.value)) {
+      appState.players = playersRes.value;
+    }
+
+    if (scoreRes.status === 'fulfilled' && Array.isArray(scoreRes.value)) {
+      appState.scoreboard = scoreRes.value;
+    }
+
+    appState.loading.app = false;
+    navigateTo(appState.currentView);
+  });
+}
+
+// Start application when DOM is ready
+document.addEventListener('DOMContentLoaded', initApp);
+</script>
