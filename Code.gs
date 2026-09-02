@@ -151,40 +151,67 @@ function getAppStatus() {
 }
 
 /**
+ * Helper to include partial HTML files (Styles, Scripts, Components) into Index.html.
+ * @param {string} filename - Name of HTML file without extension
+ * @returns {string} HTML content
+ */
+function include(filename) {
+  if (typeof HtmlService !== 'undefined') {
+    return HtmlService.createHtmlOutputFromFile(filename).getContent();
+  }
+  return '';
+}
+
+/**
  * HTTP GET endpoint for Web App.
- * Useful for health checks and read-only JSON responses.
+ * - Renders the Mobile-First HTML UI when accessed via browser.
+ * - Or returns JSON response if '?action=...' parameter is provided.
  *
  * @param {Object} e - Event parameter
- * @returns {GoogleAppsScript.Content.TextOutput} JSON response
+ * @returns {GoogleAppsScript.HTML.HtmlOutput | GoogleAppsScript.Content.TextOutput}
  */
 function doGet(e) {
-  const action = e && e.parameter ? e.parameter.action : 'status';
-  let result;
+  const action = e && e.parameter ? e.parameter.action : null;
 
-  switch (action) {
-    case 'status':
-      result = getAppStatus();
-      break;
-    case 'players':
-      result = getPlayers(e.parameter.includeInactive === 'true');
-      break;
-    case 'history':
-      result = getGameHistory({
-        includeCancelled: e.parameter.includeCancelled === 'true',
-        limit: parseInt(e.parameter.limit, 10) || undefined
-      });
-      break;
-    case 'scoreboard':
-      result = getScoreboard(e.parameter.sessionId);
-      break;
-    default:
-      result = _UTILS_CODE.responseOk({ status: 'active', message: 'Chốt Điểm Apps Script Backend API' });
+  // If action is requested, handle as JSON API endpoint
+  if (action) {
+    let result;
+    switch (action) {
+      case 'status':
+        result = getAppStatus();
+        break;
+      case 'players':
+        result = getPlayers(e.parameter.includeInactive === 'true');
+        break;
+      case 'history':
+        result = getGameHistory({
+          includeCancelled: e.parameter.includeCancelled === 'true',
+          limit: parseInt(e.parameter.limit, 10) || undefined
+        });
+        break;
+      case 'scoreboard':
+        result = getScoreboard(e.parameter.sessionId);
+        break;
+      default:
+        result = _UTILS_CODE.responseOk({ status: 'active', message: 'Chốt Điểm Apps Script Backend API' });
+    }
+
+    if (typeof ContentService !== 'undefined') {
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+    return result;
   }
 
-  if (typeof ContentService !== 'undefined') {
-    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  // Default: Render HTML UI
+  if (typeof HtmlService !== 'undefined') {
+    return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('Chốt Điểm')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
-  return result;
+
+  return _UTILS_CODE.responseOk({ message: 'HTML Service not available in this environment' });
 }
 
 /**

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Chốt Điểm - Web App Tính Điểm Ván Đấu</title>
+  
+  <!-- Include Mobile-First CSS Styles -->
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="app-shell">
+    
+    <!-- Top Fixed/Sticky Header -->
+    <header class="app-header">
+      <div class="app-header__title-group">
+        <div class="app-header__logo">
+          <span>🎯</span>
+          <span>Chốt Điểm</span>
+        </div>
+        <span id="session-badge" class="app-header__session-badge">Phiên chơi</span>
+      </div>
+      <div class="app-header__actions">
+        <button type="button" id="btn-refresh" class="icon-button" aria-label="Làm mới dữ liệu" title="Làm mới">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Views Container -->
+    <main class="app-main">
+      
+      <!-- Screen 1: BẢNG ĐIỂM (Scoreboard) -->
+      <section id="view-scoreboard" class="view view--active" aria-label="Màn hình Bảng điểm">
+        <div class="section-title">
+          <span>Bảng Xếp Hạng</span>
+          <button type="button" class="btn-secondary" style="min-height: 36px; padding: 0 12px; font-size: 0.85rem;" onclick="navigateTo('new-game')">
+            + Ván mới
+          </button>
+        </div>
+        <div id="scoreboard-container">
+          <!-- Dynamic Scoreboard List will be rendered here -->
+        </div>
+      </section>
+
+      <!-- Screen 2: VÁN MỚI (New Game - 6 Steps) -->
+      <section id="view-new-game" class="view" aria-label="Màn hình Ván mới">
+        <div class="section-title">
+          <span>Chốt Điểm Ván Mới</span>
+        </div>
+
+        <!-- Step 1: Chọn Người Cầm Đầu A -->
+        <div class="step-card">
+          <div class="step-header">
+            <span style="font-weight: 700; font-size: 0.95rem;">1. Chọn Người Cầm Đầu (A)</span>
+            <span class="step-badge">Bắt buộc</span>
+          </div>
+          <div id="step-leader-list" class="leader-grid">
+            <!-- Dynamic Leader Chips -->
+          </div>
+        </div>
+
+        <!-- Step 2: Kiểm Tra Cược Mặc Định -->
+        <div class="step-card">
+          <div class="step-header">
+            <span style="font-weight: 700; font-size: 0.95rem;">2. Mức Cược Ván</span>
+          </div>
+          <div id="step-default-bet-container">
+            <!-- Dynamic Bet Bar -->
+          </div>
+        </div>
+
+        <!-- Step 3 & 4: Danh Sách Người Đối Đầu (Kết quả & Cược riêng) -->
+        <div class="step-card">
+          <div class="step-header">
+            <span style="font-weight: 700; font-size: 0.95rem;">3. Kết Quả Người Đối Đầu</span>
+          </div>
+          <div id="step-opponents-list" class="opponents-list">
+            <!-- Dynamic Opponent Cards with Quick + / 0 / - Buttons -->
+          </div>
+        </div>
+
+        <!-- Step 5: Xem Điểm Dự Kiến -->
+        <div id="step-preview-container">
+          <!-- Dynamic Live Preview Bar -->
+        </div>
+
+        <!-- Step 6: Chốt Ván Button (Sticky) -->
+        <div class="sticky-action-bar">
+          <button type="button" id="btn-submit-game" class="btn-primary-large" onclick="submitGame()">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Chốt Ván Đấu
+          </button>
+        </div>
+      </section>
+
+      <!-- Screen 3: LỊCH SỬ (History) -->
+      <section id="view-history" class="view" aria-label="Màn hình Lịch sử">
+        <div class="section-title">
+          <span>Lịch Sử Ván Đấu</span>
+        </div>
+        <div id="history-container">
+          <!-- Dynamic History List -->
+        </div>
+      </section>
+
+      <!-- Screen 4: NGƯỜI CHƠI (Players) -->
+      <section id="view-players" class="view" aria-label="Màn hình Người chơi">
+        <div class="section-title">
+          <span>Quản Lý Người Chơi</span>
+        </div>
+        <div id="players-container">
+          <!-- Dynamic Players Form & List -->
+        </div>
+      </section>
+
+      <!-- Screen 5: CÀI ĐẶT (Settings) -->
+      <section id="view-settings" class="view" aria-label="Màn hình Cài đặt">
+        <div class="section-title">
+          <span>Cài Đặt Phiên Chơi</span>
+        </div>
+        <div id="settings-container">
+          <!-- Dynamic Settings -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar (Mobile First) -->
+    <nav class="app-nav" aria-label="Thanh điều hướng chính">
+      <div class="app-nav__container">
+        <!-- 1. Bảng Điểm -->
+        <button type="button" class="nav-item nav-item--active" data-view="scoreboard" aria-label="Bảng điểm">
+          <span class="nav-item__icon">🏆</span>
+          <span>Bảng điểm</span>
+        </button>
+
+        <!-- 2. Ván Mới (Featured Button) -->
+        <button type="button" class="nav-item nav-item--featured" data-view="new-game" aria-label="Ván mới">
+          <div class="nav-item__icon-wrapper">
+            <span class="nav-item__icon">⚡</span>
+          </div>
+          <span>Ván mới</span>
+        </button>
+
+        <!-- 3. Lịch Sử -->
+        <button type="button" class="nav-item" data-view="history" aria-label="Lịch sử ván">
+          <span class="nav-item__icon">📜</span>
+          <span>Lịch sử</span>
+        </button>
+
+        <!-- 4. Người Chơi -->
+        <button type="button" class="nav-item" data-view="players" aria-label="Người chơi">
+          <span class="nav-item__icon">👥</span>
+          <span>Người chơi</span>
+        </button>
+
+        <!-- 5. Cài Đặt -->
+        <button type="button" class="nav-item" data-view="settings" aria-label="Cài đặt">
+          <span class="nav-item__icon">⚙️</span>
+          <span>Cài đặt</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  </div>
+
+  <!-- Include Reusable Component SVG Definitions -->
+  <?!= include('Components'); ?>
+
+  <!-- Include Frontend JavaScript Logic -->
+  <?!= include('Scripts'); ?>
+</body>
+</html>
