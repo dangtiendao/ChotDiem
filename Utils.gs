@@ -398,6 +398,39 @@ function recordAuditLog(ss, entry) {
   }
 }
 
+/**
+ * Gets current audit version for a game to support optimistic concurrency control.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss - Active spreadsheet
+ * @param {string} gameId - Game ID (e.g. 'V000001')
+ * @returns {number} Version number (default 1)
+ */
+function getGameCurrentVersion(ss, gameId) {
+  try {
+    if (!ss || !gameId) return 1;
+    const auditSheet = ss.getSheetByName(_CONFIG.SHEET_NAMES.LICH_SU_THAY_DOI);
+    if (!auditSheet || auditSheet.getLastRow() <= 1) return 1;
+
+    const lastRow = auditSheet.getLastRow();
+    const values = auditSheet.getRange(2, 1, lastRow - 1, 9).getValues();
+    let maxVersion = 1;
+
+    for (const r of values) {
+      if (String(r[1] || '').trim() === gameId) {
+        const ver = parseInt(r[8], 10);
+        if (!isNaN(ver) && ver >= maxVersion) {
+          maxVersion = ver + 1;
+        } else {
+          maxVersion++;
+        }
+      }
+    }
+    return maxVersion;
+  } catch (err) {
+    console.warn('[getGameCurrentVersion] Error:', err);
+    return 1;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     responseOk,
@@ -409,6 +442,7 @@ if (typeof module !== 'undefined' && module.exports) {
     clearAppCache,
     getHeaderMap,
     getLatestGameNumber,
+    getGameCurrentVersion,
     normalizeString,
     safeJsonParse,
     safeJsonStringify,

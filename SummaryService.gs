@@ -204,7 +204,13 @@ function rebuildSummarySheet() {
     const scoreboard = scoreboardRes.data || [];
 
     // Clear existing contents in TONG_KET
-    summarySheet.clearContents();
+    if (typeof summarySheet.clearContents === 'function') {
+      summarySheet.clearContents();
+    } else if (typeof summarySheet.clear === 'function') {
+      summarySheet.clear();
+    } else if (summarySheet.getLastRow() > 0) {
+      summarySheet.getRange(1, 1, summarySheet.getLastRow(), summarySheet.getLastColumn() || 1).clearContent();
+    }
 
     // Write header
     summarySheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
