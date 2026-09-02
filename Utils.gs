@@ -70,11 +70,26 @@ function getActiveSpreadsheet(spreadsheetId) {
     return SpreadsheetApp.openById(spreadsheetId);
   }
 
-  const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) {
-    throw new Error('Không tìm thấy Spreadsheet đang liên kết. Hãy mở Apps Script từ menu Extensions > Apps Script của Google Sheets.');
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) return active;
+  } catch (err) {
+    // Ignore and fallback to ScriptProperties
   }
-  return active;
+
+  try {
+    if (typeof PropertiesService !== 'undefined') {
+      const props = PropertiesService.getScriptProperties();
+      const ssId = props.getProperty('SPREADSHEET_ID');
+      if (ssId) {
+        return SpreadsheetApp.openById(ssId);
+      }
+    }
+  } catch (err) {
+    console.warn('[getActiveSpreadsheet] Failed to open by SPREADSHEET_ID property:', err);
+  }
+
+  throw new Error('Không tìm thấy Spreadsheet. Hãy mở Apps Script từ menu Extensions > Apps Script của Google Sheets hoặc cấu hình SPREADSHEET_ID trong Script Properties.');
 }
 
 /**
@@ -431,6 +446,106 @@ function getGameCurrentVersion(ss, gameId) {
   }
 }
 
+/**
+ * Sanitizes object by removing sensitive fields (tokens, passwords, secrets).
+ * @param {Object} obj - Input object
+ * @returns {Object} Sanitized object
+ */
+function sanitizeLogDetails(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  try {
+    const sensitiveKeys = ['token', 'password', 'secret', 'auth', 'cookie', 'credential', 'key'];
+    const sanitized = Array.isArray(obj) ? [] : {};
+
+    for (const k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        const isSensitive = sensitiveKeys.some((s) => k.toLowerCase().includes(s));
+        if (isSensitive) {
+          sanitized[k] = '[REDACTED]';
+        } else if (typeof obj[k] === 'object' && obj[k] !== null) {
+          sanitized[k] = sanitizeLogDetails(obj[k]);
+        } else {
+          sanitized[k] = obj[k];
+        }
+      }
+    }
+    return sanitized;
+  } catch (err) {
+    return '[Sanitization Error]';
+  }
+}
+
+/**
+ * Logs an important operational or error event into the NHAT_KY sheet.
+ *
+ * @param {string} [level="INFO"] - Log level (INFO, WARN, ERROR)
+ * @param {string} [code=""] - Error/Event code
+ * @param {Object} [context={}] - Context details
+ * @param {string} [context.source="BACKEND"] - Source module/component
+ * @param {string} [context.handler=""] - Handling function name
+ * @param {string} [context.sessionId=""] - Session ID
+ * @param {string} [context.gameId=""] - Game ID if applicable
+ * @param {string} [context.message=""] - Human-readable summary
+ * @param {any} [context.details=null] - Additional details/stack trace
+ * @param {string} [context.user="web_user"] - Initiating user/role
+ * @param {string} [context.requestId=""] - Request ID
+ * @returns {boolean} True if logged successfully
+ */
+function logImportantEvent(level, code, context = {}) {
+  try {
+    const lvl = String(level || _CONFIG.LOG_LEVELS.INFO).toUpperCase();
+    const cCode = String(code || 'INFO');
+    const ctx = context || {};
+
+    console.log(`[${lvl}][${cCode}] ${ctx.message || ''}`, ctx.details || '');
+
+    const ss = getActiveSpreadsheet();
+    if (!ss) return false;
+
+    let logSheet = ss.getSheetByName(_CONFIG.SHEET_NAMES.NHAT_KY);
+    if (!logSheet) {
+      logSheet = ss.insertSheet(_CONFIG.SHEET_NAMES.NHAT_KY);
+      logSheet.getRange(1, 1, 1, _CONFIG.HEADERS.NHAT_KY.length).setValues([_CONFIG.HEADERS.NHAT_KY]);
+      logSheet.setFrozenRows(1);
+    }
+
+    let detailStr = '';
+    if (ctx.details) {
+      if (typeof ctx.details === 'string') {
+        detailStr = ctx.details;
+      } else {
+        const sanitized = sanitizeLogDetails(ctx.details);
+        detailStr = safeJsonStringify(sanitized);
+      }
+    }
+
+    // Limit length to 5000 chars per cell
+    if (detailStr.length > 5000) {
+      detailStr = detailStr.substring(0, 4990) + '...[TRUNCATED]';
+    }
+
+    const row = [
+      new Date(),
+      lvl,
+      cCode,
+      String(ctx.source || 'BACKEND').substring(0, 50),
+      String(ctx.handler || '').substring(0, 100),
+      String(ctx.sessionId || '').substring(0, 50),
+      String(ctx.gameId || '').substring(0, 50),
+      String(ctx.message || '').substring(0, 500),
+      detailStr,
+      String(ctx.user || 'web_user').substring(0, 50),
+      String(ctx.requestId || '').substring(0, 100)
+    ];
+
+    logSheet.appendRow(row);
+    return true;
+  } catch (err) {
+    console.error('[logImportantEvent] Failed to record log into NHAT_KY:', err);
+    return false;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     responseOk,
@@ -450,6 +565,8 @@ if (typeof module !== 'undefined' && module.exports) {
     generateNextPlayerId,
     generateNextGameId,
     generateNextAuditId,
-    recordAuditLog
+    recordAuditLog,
+    sanitizeLogDetails,
+    logImportantEvent
   };
 }

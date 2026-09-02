@@ -1641,6 +1641,86 @@ async function rebuildScoreboardManual() {
   );
 }
 
+async function handleExportData(format = 'csv') {
+  const btnId = format === 'json' ? 'btn-export-json' : 'btn-export-csv';
+  const btn = document.getElementById(btnId);
+  const oldText = btn ? btn.innerHTML : '';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Đang chuẩn bị tệp...';
+    }
+    showToast('Đang trích xuất dữ liệu...', 'info');
+
+    const res = await GasClient.call('exportSessionData', format);
+    if (!res || !res.content) {
+      throw new Error('Dữ liệu xuất rỗng');
+    }
+
+    // Create a Blob and trigger direct browser download
+    const blob = new Blob([res.content], { type: res.mimeType || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = res.filename || `ChotDiem_Export.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Đã tải xuống thành công '${res.filename}'!`, 'success');
+  } catch (err) {
+    console.error('[handleExportData] Error:', err);
+    showToast(`Lỗi xuất dữ liệu: ${err.message}`, 'danger');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = oldText;
+    }
+  }
+}
+
+async function handleHealthCheck() {
+  const btn = document.getElementById('btn-health-check');
+  const oldText = btn ? btn.innerHTML : '';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Đang kiểm tra...';
+    }
+    showToast('Đang kiểm tra sức khỏe hệ thống...', 'info');
+
+    const res = await GasClient.call('runPreDeploymentCheck');
+    if (res && res.ok) {
+      showConfirmDialog(
+        '✅ Hệ Thống Khỏe Mạnh (Pre-Deployment PASS)',
+        `<div style="text-align: left; font-size: 0.9rem; line-height: 1.5;">
+          ${res.checks.map((c) => `<div>${c.ok ? '✅' : '❌'} <b>${escapeHtml(c.name)}</b>: ${escapeHtml(c.message)}</div>`).join('')}
+        </div>`,
+        null
+      );
+    } else {
+      const errList = res && res.errors ? res.errors.map((e) => `<li>${escapeHtml(e)}</li>`).join('') : '';
+      showConfirmDialog(
+        '⚠️ Phát Hiện Lỗi Hệ Thống',
+        `<div style="text-align: left; font-size: 0.9rem; color: var(--color-danger);">
+          <ul>${errList || 'Hệ thống cần kiểm tra lại cấu trúc bảng.'}</ul>
+        </div>`,
+        null
+      );
+    }
+  } catch (err) {
+    showToast(`Lỗi kiểm tra: ${err.message}`, 'danger');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = oldText;
+    }
+  }
+}
+
 // Fallback Mock data handler for local testing
 function mockApiResponse(fn, args) {
   if (fn === 'getAppBootstrapData') {

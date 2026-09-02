@@ -211,6 +211,14 @@ function doGet(e) {
       case 'scoreboard':
         result = getScoreboard(e.parameter.sessionId);
         break;
+      case 'preDeploymentCheck':
+      case 'runPreDeploymentCheck':
+        result = typeof runPreDeploymentCheck === 'function' ? runPreDeploymentCheck() : _UTILS_CODE.responseOk({ status: 'active' });
+        break;
+      case 'exportData':
+      case 'exportSessionData':
+        result = typeof exportSessionData === 'function' ? exportSessionData(e.parameter.format) : _UTILS_CODE.responseError(_CFG_CODE.ERROR_CODES.INTERNAL_ERROR, 'Hàm export chưa sẵn sàng');
+        break;
       default:
         result = _UTILS_CODE.responseOk({ status: 'active', message: 'Chốt Điểm Apps Script Backend API' });
     }
@@ -252,7 +260,29 @@ function doPost(e) {
         result = typeof getAppBootstrapData === 'function' ? getAppBootstrapData(postData.sessionId) : getAppStatus();
         break;
       case 'setupApp':
-        result = setupApp(postData.config);
+        result = typeof prepareCleanSpreadsheet === 'function' ? prepareCleanSpreadsheet(postData.config) : setupApp(postData.config);
+        break;
+      case 'prepareCleanSpreadsheet':
+        result = typeof prepareCleanSpreadsheet === 'function' ? prepareCleanSpreadsheet(postData.config) : setupApp(postData.config);
+        break;
+      case 'preDeploymentCheck':
+      case 'runPreDeploymentCheck':
+        result = typeof runPreDeploymentCheck === 'function' ? runPreDeploymentCheck() : getAppStatus();
+        break;
+      case 'cleanupTestData':
+        result = typeof cleanupTestData === 'function' ? cleanupTestData(postData.options) : _UTILS_CODE.responseError(_CFG_CODE.ERROR_CODES.INTERNAL_ERROR, 'Hàm cleanupTestData chưa sẵn sàng');
+        break;
+      case 'createBackup':
+      case 'createSpreadsheetBackup':
+        result = typeof createSpreadsheetBackup === 'function' ? createSpreadsheetBackup(postData.options) : _UTILS_CODE.responseError(_CFG_CODE.ERROR_CODES.INTERNAL_ERROR, 'Hàm createSpreadsheetBackup chưa sẵn sàng');
+        break;
+      case 'exportData':
+      case 'exportSessionData':
+        result = typeof exportSessionData === 'function' ? exportSessionData(postData.format) : _UTILS_CODE.responseError(_CFG_CODE.ERROR_CODES.INTERNAL_ERROR, 'Hàm exportSessionData chưa sẵn sàng');
+        break;
+      case 'protectSheets':
+      case 'protectSystemSheets':
+        result = typeof protectSystemSheets === 'function' ? protectSystemSheets() : _UTILS_CODE.responseOk({});
         break;
       case 'addPlayer':
         result = addPlayer(postData.name);
