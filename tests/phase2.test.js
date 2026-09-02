@@ -183,7 +183,7 @@ console.log('--- 1. setupApp() & Initialization ---');
 it('setupApp initializes 4 sheets with correct headers & default config', () => {
   const res = setupApp({ sessionName: 'Test Session', defaultBet: 5 });
   assert.strictEqual(res.ok, true);
-  assert.strictEqual(res.data.createdSheets.length, 4);
+  assert.strictEqual(res.data.createdSheets.length, 5);
 
   const status = getAppStatus();
   assert.strictEqual(status.ok, true);
@@ -196,7 +196,7 @@ it('setupApp is idempotent on subsequent runs without overwriting or duplicating
   const res2 = setupApp();
   assert.strictEqual(res2.ok, true);
   assert.strictEqual(res2.data.createdSheets.length, 0);
-  assert.strictEqual(res2.data.existingSheets.length, 4);
+  assert.strictEqual(res2.data.existingSheets.length, 5);
 });
 
 // 2. PLAYER SERVICE TESTS
