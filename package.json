@@ -1,0 +1,17 @@
+{
+  "name": "chot-diem",
+  "version": "1.0.0",
+  "description": "Web App ghi nhận và tính điểm từng ván chơi (Google Apps Script & Google Sheets backend)",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node tests/phase1.test.js"
+  },
+  "keywords": [
+    "google-apps-script",
+    "scoring",
+    "zero-sum",
+    "chot-diem"
+  ],
+  "author": "",
+  "license": "MIT"
+}
