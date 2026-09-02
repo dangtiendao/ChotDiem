@@ -96,6 +96,9 @@ function setupApp(customConfig = {}) {
     // 4. Sheet TONG_KET
     ensureTableSheet(_CFG_CODE.SHEET_NAMES.TONG_KET, _CFG_CODE.HEADERS.TONG_KET);
 
+    // 5. Sheet LICH_SU_THAY_DOI (Audit log)
+    ensureTableSheet(_CFG_CODE.SHEET_NAMES.LICH_SU_THAY_DOI, _CFG_CODE.HEADERS.LICH_SU_THAY_DOI);
+
     return _UTILS_CODE.responseOk(report, 'Khởi tạo cấu trúc Spreadsheet thành công.');
   } catch (err) {
     console.error('[setupApp] Error:', err);
@@ -185,9 +188,19 @@ function doGet(e) {
         break;
       case 'history':
         result = getGameHistory({
+          playerId: e.parameter.playerId,
+          leaderId: e.parameter.leaderId,
+          result: e.parameter.result,
+          fromGameNumber: e.parameter.fromGameNumber,
+          toGameNumber: e.parameter.toGameNumber,
+          status: e.parameter.status,
           includeCancelled: e.parameter.includeCancelled === 'true',
           limit: parseInt(e.parameter.limit, 10) || undefined
         });
+        break;
+      case 'detail':
+      case 'gameDetail':
+        result = getGameDetail(e.parameter.gameId);
         break;
       case 'scoreboard':
         result = getScoreboard(e.parameter.sessionId);
@@ -246,14 +259,20 @@ function doPost(e) {
       case 'saveGame':
         result = saveGame(postData.gameData);
         break;
+      case 'getGameDetail':
+        result = getGameDetail(postData.gameId);
+        break;
       case 'updateGame':
-        result = updateGame(postData.gameId, postData.gameData);
+        result = updateGame(postData.gameId, postData.gameData, postData.expectedVersion);
         break;
       case 'cancelGame':
-        result = cancelGame(postData.gameId);
+        result = cancelGame(postData.gameId, postData.reason, postData.expectedVersion);
         break;
       case 'restoreGame':
-        result = restoreGame(postData.gameId);
+        result = restoreGame(postData.gameId, postData.expectedVersion);
+        break;
+      case 'undoGame':
+        result = undoGame(postData.gameId, postData.expectedVersion);
         break;
       case 'getScoreboard':
         result = getScoreboard(postData.sessionId);

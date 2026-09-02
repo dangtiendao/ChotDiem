@@ -948,6 +948,293 @@ button {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ==========================================================================
+   Phase 4: History Filter Bar Styles (Task 4.3)
+   ========================================================================== */
+.filter-card {
+  background-color: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-header__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-main);
+}
+
+.filter-body {
+  display: none;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 12px;
+}
+
+.filter-body--open {
+  display: block;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-group--full {
+  grid-column: 1 / -1;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.filter-select {
+  height: 40px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-color);
+  background-color: var(--bg-card);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   Phase 4: Status Badges (Task 4.1 & Task 4.4)
+   ========================================================================== */
+.badge--edited {
+  background-color: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fce8b2;
+}
+
+.badge--cancelled {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid #fad2cf;
+}
+
+.badge--active {
+  background-color: #e6f4ea;
+  color: #137333;
+}
+
+.history-card--edited {
+  border-left: 4px solid var(--color-warning);
+}
+
+/* ==========================================================================
+   Phase 4: Quick Undo Floating Banner (Task 4.5)
+   ========================================================================== */
+.quick-undo-banner {
+  position: fixed;
+  bottom: calc(var(--nav-height) + 12px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  z-index: 500;
+  width: calc(100% - 32px);
+  max-width: 500px;
+  background-color: #202124;
+  color: #ffffff;
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  overflow: hidden;
+}
+
+.quick-undo-banner--visible {
+  transform: translateX(-50%) translateY(0);
+}
+
+.quick-undo__content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.quick-undo__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-undo {
+  background-color: #fbbc04;
+  color: #202124;
+  font-weight: 800;
+  font-size: 0.9rem;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  transition: transform var(--transition-fast);
+}
+
+.btn-undo:active {
+  transform: scale(0.95);
+}
+
+.quick-undo__progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background-color: #fbbc04;
+  width: 100%;
+}
+
+/* ==========================================================================
+   Phase 4: Modal Dialogs & Bottom Sheets (Task 4.2 & Task 4.4)
+   ========================================================================== */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  backdrop-filter: blur(2px);
+}
+
+.modal-backdrop--open {
+  display: flex;
+  opacity: 1;
+}
+
+.modal-dialog {
+  background-color: var(--bg-card);
+  width: 100%;
+  max-width: 600px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-backdrop--open .modal-dialog {
+  transform: translateY(0);
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px)) 20px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  background-color: var(--bg-card);
+}
+
+/* Modal Content Components */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.detail-box {
+  background-color: var(--bg-subtle);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+}
+
+.detail-box__label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.detail-box__value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.participant-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.participant-table th, .participant-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.9rem;
+}
+
+.participant-table th {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
 /* Accessibility & Focus Visible */
 button:focus-visible, input:focus-visible {
   outline: 2px solid var(--border-focus);

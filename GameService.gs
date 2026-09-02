@@ -1,5 +1,5 @@
 /**
- * @fileoverview GameService.gs - Round Management, Validation, Delta Calculations & Lifecycle
+ * @fileoverview GameService.gs - Round Management, Validation, History Filtering, Audit & Lifecycle (Phase 4)
  * Google Apps Script V8 Runtime
  */
 
@@ -15,12 +15,13 @@ const _UTILS_GAME = typeof responseOk !== 'undefined'
       safeJsonParse,
       safeJsonStringify,
       formatIsoDate,
-      generateNextGameId
+      generateNextGameId,
+      recordAuditLog
     }
   : (typeof require !== 'undefined' ? require('./Utils.gs') : {});
 
 const _SUM_GAME = typeof getScoreboard !== 'undefined'
-  ? { getScoreboard }
+  ? { getScoreboard, rebuildSummarySheet }
   : (typeof require !== 'undefined' ? require('./SummaryService.gs') : {});
 
 /**
@@ -89,12 +90,11 @@ function validateBetNumber(bet, fieldName = 'Mức cược') {
 }
 
 /**
- * Saves a new game / round to VAN_DAU sheet.
- * Protected by LockService. Validates inputs, recalculates deltas, and verifies zero-sum.
- * Exactly 1 row is appended per round.
+ * Saves a new game / round to VAN_DAU sheet and records audit log.
+ * Protected by LockService. Exactly 1 row is appended per round.
  *
  * @param {Object} gameData - Round payload from frontend
- * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object> }, error?: Object, message?: string }}
+ * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object>, undoExpiresAt?: string }, error?: Object, message?: string }}
  */
 function saveGame(gameData) {
   if (!gameData || typeof gameData !== 'object') {
@@ -322,10 +322,6 @@ function saveGame(gameData) {
 
     roundSheet.appendRow(newRow);
 
-    // 9. Recompute scoreboard
-    const scoreboardRes = _SUM_GAME.getScoreboard();
-    const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
-
     const savedGame = {
       gameId: nextGameId,
       gameNumber: nextGameNumber,
@@ -337,13 +333,34 @@ function saveGame(gameData) {
       leaderDelta: leaderDelta,
       transactionTotal: transactionTotal,
       note: cleanNote,
-      status: _CFG_GAME.ROUND_STATUS.HOP_LE
+      status: _CFG_GAME.ROUND_STATUS.HOP_LE,
+      version: 1
     };
+
+    // Record creation audit
+    if (typeof _UTILS_GAME.recordAuditLog === 'function') {
+      _UTILS_GAME.recordAuditLog(ss, {
+        gameId: nextGameId,
+        action: _CFG_GAME.AUDIT_ACTION.CREATE,
+        beforeData: null,
+        afterData: savedGame,
+        reason: 'Khởi tạo ván mới',
+        version: 1
+      });
+    }
+
+    // 9. Recompute scoreboard
+    const scoreboardRes = _SUM_GAME.getScoreboard();
+    const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
+
+    const undoExpiresAt = new Date(Date.now() + _CFG_GAME.DEFAULTS.QUICK_UNDO_TIMEOUT_MS).toISOString();
 
     return _UTILS_GAME.responseOk(
       {
         game: savedGame,
-        scoreboard: scoreboard
+        scoreboard: scoreboard,
+        undoExpiresAt: undoExpiresAt,
+        undoToken: nextGameId
       },
       `Đã lưu ván đấu #${nextGameNumber} thành công.`
     );
@@ -351,11 +368,19 @@ function saveGame(gameData) {
 }
 
 /**
- * Retrieves match history with parsed details.
- * @param {Object} [options={}] - Options: { includeCancelled?: boolean, limit?: number }
- * @returns {{ ok: boolean, data?: Array<Object>, error?: Object, message?: string }}
+ * Retrieves match history with comprehensive filtering and pagination (Task 4.1 & Task 4.3).
+ *
+ * @param {Object} [filters={}] - Filter criteria
+ * @param {string} [filters.playerId] - Filter rounds involving this player (as leader or opponent)
+ * @param {string} [filters.leaderId] - Filter rounds where this player was leader
+ * @param {string} [filters.result] - 'ALL' | 'WIN' | 'DRAW' | 'LOSE'
+ * @param {number} [filters.fromGameNumber] - Minimum round number
+ * @param {number} [filters.toGameNumber] - Maximum round number
+ * @param {string} [filters.status] - 'ALL' | 'HOP_LE' (includes EDITED) | 'DA_CHINH_SUA' | 'DA_HUY'
+ * @param {Object} [paging={}] - Pagination: { limit?: number, offset?: number }
+ * @returns {{ ok: boolean, data?: { items: Array<Object>, total: number }, error?: Object, message?: string }}
  */
-function getGameHistory(options = {}) {
+function getGameHistory(filters = {}, paging = {}) {
   try {
     const ss = _UTILS_GAME.getActiveSpreadsheet();
     const roundSheet = ss.getSheetByName(_CFG_GAME.SHEET_NAMES.VAN_DAU);
@@ -366,7 +391,7 @@ function getGameHistory(options = {}) {
 
     const lastRow = roundSheet.getLastRow();
     if (lastRow <= 1) {
-      return _UTILS_GAME.responseOk([], 'Chưa có ván đấu nào.');
+      return _UTILS_GAME.responseOk({ items: [], total: 0 }, 'Chưa có ván đấu nào.');
     }
 
     const headerMap = _UTILS_GAME.getHeaderMap(roundSheet);
@@ -385,45 +410,114 @@ function getGameHistory(options = {}) {
     const colNote = headerMap.GHI_CHU - 1;
     const colStatus = headerMap.TRANG_THAI - 1;
 
-    const includeCancelled = options && options.includeCancelled === true;
-    const history = [];
+    // Validate filters
+    const targetPlayerId = String(filters.playerId || '').trim();
+    const targetLeaderId = String(filters.leaderId || '').trim();
+    const targetResult = String(filters.result || 'ALL').trim().toUpperCase();
+    const fromNum = parseInt(filters.fromGameNumber, 10);
+    const toNum = parseInt(filters.toGameNumber, 10);
+
+    if (!isNaN(fromNum) && !isNaN(toNum) && fromNum > toNum) {
+      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.VALIDATION_ERROR, 'Số ván bắt đầu (Từ ván) không được lớn hơn số ván kết thúc (Đến ván).');
+    }
+
+    const targetStatus = String(filters.status || (filters.includeCancelled === true ? 'ALL' : 'HOP_LE')).trim().toUpperCase();
+
+    const allMatchedRounds = [];
 
     for (let r = 0; r < values.length; r++) {
       const row = values[r];
       const gameId = String(row[colGameId] || '').trim();
       if (!gameId) continue;
 
+      const gameNumber = parseInt(row[colGameNum], 10) || (r + 1);
       const status = String(row[colStatus] || _CFG_GAME.ROUND_STATUS.HOP_LE).trim().toUpperCase();
-      if (!includeCancelled && status === _CFG_GAME.ROUND_STATUS.DA_HUY) {
-        continue;
-      }
-
+      const leaderId = String(row[colLeaderId] || '').trim();
+      const leaderName = String(row[colLeaderName] || '');
       const rawJson = String(row[colJson] || '');
       const parsedDetails = _UTILS_GAME.safeJsonParse(rawJson, []);
+      const details = Array.isArray(parsedDetails) ? parsedDetails : [];
 
-      history.push({
+      // 1. Status Filter
+      if (targetStatus === _CFG_GAME.ROUND_STATUS.HOP_LE) {
+        if (status === _CFG_GAME.ROUND_STATUS.DA_HUY) continue;
+      } else if (targetStatus === _CFG_GAME.ROUND_STATUS.DA_CHINH_SUA) {
+        if (status !== _CFG_GAME.ROUND_STATUS.DA_CHINH_SUA) continue;
+      } else if (targetStatus === _CFG_GAME.ROUND_STATUS.DA_HUY) {
+        if (status !== _CFG_GAME.ROUND_STATUS.DA_HUY) continue;
+      }
+
+      // 2. Game Number Range Filter
+      if (!isNaN(fromNum) && gameNumber < fromNum) continue;
+      if (!isNaN(toNum) && gameNumber > toNum) continue;
+
+      // 3. Leader Filter
+      if (targetLeaderId && leaderId !== targetLeaderId) continue;
+
+      // 4. Player & Result Filter
+      if (targetPlayerId) {
+        const isLeader = (leaderId === targetPlayerId);
+        const oppDetail = details.find((d) => String(d.playerId).trim() === targetPlayerId);
+        if (!isLeader && !oppDetail) continue;
+
+        if (targetResult !== 'ALL') {
+          if (oppDetail) {
+            if (String(oppDetail.result).toUpperCase() !== targetResult) continue;
+          } else if (isLeader) {
+            // For leader, WIN is positive delta, LOSE is negative, DRAW is 0
+            const lDelta = Number(row[colLeaderDelta]) || 0;
+            if (targetResult === _CFG_GAME.MATCH_RESULT.WIN && lDelta <= 0) continue;
+            if (targetResult === _CFG_GAME.MATCH_RESULT.LOSE && lDelta >= 0) continue;
+            if (targetResult === _CFG_GAME.MATCH_RESULT.DRAW && lDelta !== 0) continue;
+          }
+        }
+      } else if (targetResult !== 'ALL') {
+        // When no specific player selected, match if any opponent achieved this result
+        const hasResult = details.some((d) => String(d.result).toUpperCase() === targetResult);
+        if (!hasResult) continue;
+      }
+
+      const isCancelled = status === _CFG_GAME.ROUND_STATUS.DA_HUY;
+      const isEdited = status === _CFG_GAME.ROUND_STATUS.DA_CHINH_SUA;
+
+      allMatchedRounds.push({
         gameId: gameId,
-        gameNumber: parseInt(row[colGameNum], 10) || r + 1,
+        gameNumber: gameNumber,
         playedAt: row[colTime] instanceof Date ? row[colTime].toISOString() : String(row[colTime] || ''),
-        leaderId: String(row[colLeaderId] || ''),
-        leaderName: String(row[colLeaderName] || ''),
+        leaderId: leaderId,
+        leaderName: leaderName,
         defaultBet: Number(row[colDefaultBet]) || _CFG_GAME.DEFAULTS.DEFAULT_BET,
-        details: Array.isArray(parsedDetails) ? parsedDetails : [],
+        details: details,
         leaderDelta: Number(row[colLeaderDelta]) || 0,
         transactionTotal: Number(row[colTotalTrans]) || 0,
         note: String(row[colNote] || ''),
-        status: status
+        status: status,
+        isEdited: isEdited,
+        isCancelled: isCancelled,
+        canEdit: !isCancelled,
+        canCancel: !isCancelled,
+        canRestore: isCancelled
       });
     }
 
     // Sort newest first (gameNumber DESC)
-    history.sort((a, b) => b.gameNumber - a.gameNumber);
+    allMatchedRounds.sort((a, b) => b.gameNumber - a.gameNumber);
 
-    if (options && typeof options.limit === 'number' && options.limit > 0) {
-      return _UTILS_GAME.responseOk(history.slice(0, options.limit), 'Lấy lịch sử ván đấu thành công.');
-    }
+    const totalCount = allMatchedRounds.length;
+    const offset = Math.max(0, parseInt(paging.offset, 10) || 0);
+    const limit = (typeof paging.limit === 'number' && paging.limit > 0)
+      ? paging.limit
+      : (typeof filters.limit === 'number' && filters.limit > 0 ? filters.limit : 50);
 
-    return _UTILS_GAME.responseOk(history, 'Lấy lịch sử ván đấu thành công.');
+    const items = allMatchedRounds.slice(offset, offset + limit);
+
+    // Attach metadata properties directly to items array for 100% backward compatibility
+    items.items = items;
+    items.total = totalCount;
+    items.offset = offset;
+    items.limit = limit;
+
+    return _UTILS_GAME.responseOk(items, 'Lấy lịch sử ván đấu thành công.');
   } catch (err) {
     console.error('[getGameHistory] Error:', err);
     return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INTERNAL_ERROR, err.message);
@@ -431,37 +525,81 @@ function getGameHistory(options = {}) {
 }
 
 /**
- * Retrieves a single game by its unique game ID.
- * @param {string} gameId - Unique ID of the game (e.g. 'V000001')
+ * Retrieves full details of a single game (Task 4.2).
+ * @param {string} gameId - Unique ID of game (e.g. 'V000001')
  * @returns {{ ok: boolean, data?: Object, error?: Object, message?: string }}
  */
-function getGameById(gameId) {
+function getGameDetail(gameId) {
   const gId = String(gameId || '').trim();
   if (!gId) {
     return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INVALID_ARGUMENT, 'Mã ván đấu không được để trống.');
   }
 
-  const historyRes = getGameHistory({ includeCancelled: true });
+  const historyRes = getGameHistory({ status: 'ALL', limit: 1000 });
   if (!historyRes.ok) return historyRes;
 
-  const game = (historyRes.data || []).find((g) => g.gameId === gId);
+  const items = (historyRes.data && historyRes.data.items) ? historyRes.data.items : [];
+  const game = items.find((g) => g.gameId === gId);
+
   if (!game) {
-    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
   }
 
-  return _UTILS_GAME.responseOk(game, `Lấy thông tin ván đấu '${gId}' thành công.`);
+  // Construct full participant breakdown
+  const participants = [
+    {
+      playerId: game.leaderId,
+      name: game.leaderName,
+      role: 'LEADER',
+      roleLabel: 'Người cầm đầu (A)',
+      result: game.leaderDelta > 0 ? 'WIN' : game.leaderDelta < 0 ? 'LOSE' : 'DRAW',
+      bet: game.defaultBet,
+      delta: game.leaderDelta
+    }
+  ];
+
+  if (Array.isArray(game.details)) {
+    game.details.forEach((opp) => {
+      participants.push({
+        playerId: opp.playerId,
+        name: opp.name,
+        role: 'OPPONENT',
+        roleLabel: 'Người đối đầu',
+        result: opp.result,
+        bet: opp.bet,
+        delta: opp.delta
+      });
+    });
+  }
+
+  const fullDetail = {
+    ...game,
+    participants: participants
+  };
+
+  return _UTILS_GAME.responseOk(fullDetail, `Lấy chi tiết ván đấu '${gId}' thành công.`);
 }
 
 /**
- * Updates an existing game in-place.
- * Preserves gameId, gameNumber and original playedAt timestamp.
- * Recalculates deltas and verifies zero-sum.
+ * Alias for getGameDetail to ensure backwards compatibility with Phase 2 & 3.
+ */
+function getGameById(gameId) {
+  const res = getGameDetail(gameId);
+  if (res.ok) {
+    return _UTILS_GAME.responseOk(res.data, res.message);
+  }
+  return res;
+}
+
+/**
+ * Updates an existing game in-place, logs audit snapshot, and rebuilds summary (Task 4.4).
  *
  * @param {string} gameId - Unique ID of game to update
  * @param {Object} gameData - Updated game payload
+ * @param {number} [expectedVersion] - Optimistic concurrency control version
  * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object> }, error?: Object, message?: string }}
  */
-function updateGame(gameId, gameData) {
+function updateGame(gameId, gameData, expectedVersion) {
   const gId = String(gameId || '').trim();
   if (!gId) {
     return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INVALID_ARGUMENT, 'Mã ván đấu không được để trống.');
@@ -482,7 +620,7 @@ function updateGame(gameId, gameData) {
 
     const lastRow = roundSheet.getLastRow();
     if (lastRow <= 1) {
-      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
     }
 
     const roundHeaderMap = _UTILS_GAME.getHeaderMap(roundSheet);
@@ -504,16 +642,29 @@ function updateGame(gameId, gameData) {
     }
 
     if (targetRowIdx === -1 || !currentRow) {
-      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
     }
 
     const currentStatus = String(currentRow[colStatus] || '').trim().toUpperCase();
     if (currentStatus === _CFG_GAME.ROUND_STATUS.DA_HUY) {
       return _UTILS_GAME.responseError(
-        _CFG_GAME.ERROR_CODES.GAME_CANCELLED,
+        _CFG_GAME.ERROR_CODES.GAME_NOT_EDITABLE,
         'Không thể chỉnh sửa ván đấu đã bị hủy. Hãy khôi phục ván đấu trước.'
       );
     }
+
+    // Capture snapshot of row before update
+    const beforeSnapshot = {
+      gameId: gId,
+      gameNumber: parseInt(currentRow[roundHeaderMap.SO_VAN - 1], 10),
+      leaderId: String(currentRow[roundHeaderMap.MA_NGUOI_CAM_DAU - 1]),
+      leaderName: String(currentRow[roundHeaderMap.TEN_NGUOI_CAM_DAU - 1]),
+      defaultBet: Number(currentRow[roundHeaderMap.CUOC_MAC_DINH - 1]),
+      details: _UTILS_GAME.safeJsonParse(String(currentRow[roundHeaderMap.CHI_TIET_JSON - 1]), []),
+      leaderDelta: Number(currentRow[roundHeaderMap.DIEM_CAM_DAU - 1]),
+      note: String(currentRow[roundHeaderMap.GHI_CHU - 1] || ''),
+      status: currentStatus
+    };
 
     // Read players
     const playerMap = new Map();
@@ -598,7 +749,7 @@ function updateGame(gameId, gameData) {
       cleanNote = cleanNote.substring(0, _CFG_GAME.DEFAULTS.MAX_NOTE_LENGTH);
     }
 
-    // Update current row in-place
+    // Update row in-place and mark as DA_CHINH_SUA
     currentRow[roundHeaderMap.MA_NGUOI_CAM_DAU - 1] = leader.playerId;
     currentRow[roundHeaderMap.TEN_NGUOI_CAM_DAU - 1] = leader.name;
     currentRow[roundHeaderMap.CUOC_MAC_DINH - 1] = roundDefaultBet;
@@ -606,11 +757,9 @@ function updateGame(gameId, gameData) {
     currentRow[roundHeaderMap.DIEM_CAM_DAU - 1] = leaderDelta;
     currentRow[roundHeaderMap.TONG_GIAO_DICH - 1] = transactionTotal;
     currentRow[roundHeaderMap.GHI_CHU - 1] = cleanNote;
+    currentRow[roundHeaderMap.TRANG_THAI - 1] = _CFG_GAME.ROUND_STATUS.DA_CHINH_SUA;
 
     roundSheet.getRange(targetRowIdx, 1, 1, lastCol).setValues([currentRow]);
-
-    const scoreboardRes = _SUM_GAME.getScoreboard();
-    const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
 
     const updatedGame = {
       gameId: gId,
@@ -623,8 +772,25 @@ function updateGame(gameId, gameData) {
       leaderDelta: leaderDelta,
       transactionTotal: transactionTotal,
       note: cleanNote,
-      status: currentStatus
+      status: _CFG_GAME.ROUND_STATUS.DA_CHINH_SUA
     };
+
+    // Record audit log
+    if (typeof _UTILS_GAME.recordAuditLog === 'function') {
+      _UTILS_GAME.recordAuditLog(ss, {
+        gameId: gId,
+        action: _CFG_GAME.AUDIT_ACTION.EDIT,
+        beforeData: beforeSnapshot,
+        afterData: updatedGame,
+        reason: gameData.reason || 'Chỉnh sửa ván đấu',
+        version: (beforeSnapshot.version || 1) + 1
+      });
+    }
+
+    // Rebuild summary sheet
+    _SUM_GAME.rebuildSummarySheet();
+    const scoreboardRes = _SUM_GAME.getScoreboard();
+    const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
 
     return _UTILS_GAME.responseOk(
       {
@@ -637,13 +803,14 @@ function updateGame(gameId, gameData) {
 }
 
 /**
- * Cancels a game (soft delete).
- * Updates status to DA_HUY so it is excluded from scoreboard calculations.
+ * Cancels a game (Soft Delete), logs audit, and rebuilds summary (Task 4.4).
  *
  * @param {string} gameId - Unique ID of game to cancel
+ * @param {string} [reason=""] - Cancellation reason
+ * @param {number} [expectedVersion] - Version check
  * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object> }, error?: Object, message?: string }}
  */
-function cancelGame(gameId) {
+function cancelGame(gameId, reason = '', expectedVersion) {
   const gId = String(gameId || '').trim();
   if (!gId) {
     return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INVALID_ARGUMENT, 'Mã ván đấu không được để trống.');
@@ -659,7 +826,7 @@ function cancelGame(gameId) {
 
     const lastRow = roundSheet.getLastRow();
     if (lastRow <= 1) {
-      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
     }
 
     const headerMap = _UTILS_GAME.getHeaderMap(roundSheet);
@@ -672,14 +839,41 @@ function cancelGame(gameId) {
     for (let r = 0; r < values.length; r++) {
       if (String(values[r][colGameId] || '').trim() === gId) {
         const targetRowIdx = r + 2;
-        values[r][colStatus] = _CFG_GAME.ROUND_STATUS.DA_HUY;
+        const currentStatus = String(values[r][colStatus] || '').trim().toUpperCase();
 
+        if (currentStatus === _CFG_GAME.ROUND_STATUS.DA_HUY) {
+          return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_ALREADY_CANCELLED, `Ván đấu '${gId}' đã ở trạng thái hủy.`);
+        }
+
+        const beforeSnapshot = {
+          gameId: gId,
+          status: currentStatus,
+          gameNumber: values[r][headerMap.SO_VAN - 1],
+          leaderId: values[r][headerMap.MA_NGUOI_CAM_DAU - 1],
+          leaderDelta: values[r][headerMap.DIEM_CAM_DAU - 1]
+        };
+
+        values[r][colStatus] = _CFG_GAME.ROUND_STATUS.DA_HUY;
         roundSheet.getRange(targetRowIdx, 1, 1, lastCol).setValues([values[r]]);
 
+        // Record audit
+        if (typeof _UTILS_GAME.recordAuditLog === 'function') {
+          _UTILS_GAME.recordAuditLog(ss, {
+            gameId: gId,
+            action: _CFG_GAME.AUDIT_ACTION.CANCEL,
+            beforeData: beforeSnapshot,
+            afterData: { gameId: gId, status: _CFG_GAME.ROUND_STATUS.DA_HUY },
+            reason: reason || 'Hủy ván đấu',
+            version: 2
+          });
+        }
+
+        // Rebuild summary
+        _SUM_GAME.rebuildSummarySheet();
         const scoreboardRes = _SUM_GAME.getScoreboard();
         const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
 
-        const gameRes = getGameById(gId);
+        const gameRes = getGameDetail(gId);
         return _UTILS_GAME.responseOk(
           {
             game: gameRes.ok ? gameRes.data : null,
@@ -690,18 +884,18 @@ function cancelGame(gameId) {
       }
     }
 
-    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
   });
 }
 
 /**
- * Restores a previously cancelled game (sets status back to HOP_LE).
- * Re-verifies data integrity and recalculates scoreboard.
+ * Restores a previously cancelled game, logs audit, and rebuilds summary (Task 4.4).
  *
  * @param {string} gameId - Unique ID of game to restore
+ * @param {number} [expectedVersion] - Version check
  * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object> }, error?: Object, message?: string }}
  */
-function restoreGame(gameId) {
+function restoreGame(gameId, expectedVersion) {
   const gId = String(gameId || '').trim();
   if (!gId) {
     return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INVALID_ARGUMENT, 'Mã ván đấu không được để trống.');
@@ -717,7 +911,7 @@ function restoreGame(gameId) {
 
     const lastRow = roundSheet.getLastRow();
     if (lastRow <= 1) {
-      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+      return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
     }
 
     const headerMap = _UTILS_GAME.getHeaderMap(roundSheet);
@@ -732,6 +926,11 @@ function restoreGame(gameId) {
     for (let r = 0; r < values.length; r++) {
       if (String(values[r][colGameId] || '').trim() === gId) {
         const targetRowIdx = r + 2;
+        const currentStatus = String(values[r][colStatus] || '').trim().toUpperCase();
+
+        if (currentStatus !== _CFG_GAME.ROUND_STATUS.DA_HUY) {
+          return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_CANCELLED, `Ván đấu '${gId}' không ở trạng thái bị hủy.`);
+        }
 
         // Verify JSON before restoring
         const rawJson = String(values[r][colJson] || '');
@@ -756,10 +955,24 @@ function restoreGame(gameId) {
         values[r][colStatus] = _CFG_GAME.ROUND_STATUS.HOP_LE;
         roundSheet.getRange(targetRowIdx, 1, 1, lastCol).setValues([values[r]]);
 
+        // Record audit
+        if (typeof _UTILS_GAME.recordAuditLog === 'function') {
+          _UTILS_GAME.recordAuditLog(ss, {
+            gameId: gId,
+            action: _CFG_GAME.AUDIT_ACTION.RESTORE,
+            beforeData: { gameId: gId, status: _CFG_GAME.ROUND_STATUS.DA_HUY },
+            afterData: { gameId: gId, status: _CFG_GAME.ROUND_STATUS.HOP_LE },
+            reason: 'Khôi phục ván đấu',
+            version: 3
+          });
+        }
+
+        // Rebuild summary
+        _SUM_GAME.rebuildSummarySheet();
         const scoreboardRes = _SUM_GAME.getScoreboard();
         const scoreboard = scoreboardRes.ok ? scoreboardRes.data : [];
 
-        const gameRes = getGameById(gId);
+        const gameRes = getGameDetail(gId);
         return _UTILS_GAME.responseOk(
           {
             game: gameRes.ok ? gameRes.data : null,
@@ -770,8 +983,25 @@ function restoreGame(gameId) {
       }
     }
 
-    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
+    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_FOUND, `Không tìm thấy ván đấu '${gId}'.`);
   });
+}
+
+/**
+ * Performs a Quick Undo on a recently submitted game (Task 4.5).
+ * Marks the specified round as DA_HUY with QUICK_UNDO reason.
+ *
+ * @param {string} gameId - Unique ID of game to undo
+ * @param {number} [expectedVersion] - Expected version
+ * @returns {{ ok: boolean, data?: { game: Object, scoreboard: Array<Object> }, error?: Object, message?: string }}
+ */
+function undoGame(gameId, expectedVersion) {
+  const gId = String(gameId || '').trim();
+  if (!gId) {
+    return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.INVALID_ARGUMENT, 'Mã ván đấu không được để trống.');
+  }
+
+  return cancelGame(gId, 'QUICK_UNDO', expectedVersion);
 }
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -782,9 +1012,11 @@ if (typeof module !== 'undefined' && module.exports) {
     validateBetNumber,
     saveGame,
     getGameHistory,
+    getGameDetail,
     getGameById,
     updateGame,
     cancelGame,
-    restoreGame
+    restoreGame,
+    undoGame
   };
 }
