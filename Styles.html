@@ -1,42 +1,65 @@
 <style>
 /* ==========================================================================
-   CSS Custom Properties & Design Tokens (Mobile First)
+   CSS Custom Properties & Design Tokens (Mobile First - Phase 5)
    ========================================================================== */
 :root {
+  /* Brand & Status Colors */
   --color-primary: #1a73e8;
   --color-primary-hover: #1557b0;
   --color-primary-light: #e8f0fe;
   --color-primary-dark: #174ea6;
 
-  --color-success: #1e8e3e;
-  --color-success-hover: #137333;
-  --color-success-bg: #e6f4ea;
-  --color-success-text: #137333;
+  --color-win: #1e8e3e;
+  --color-win-hover: #137333;
+  --color-win-light: #e6f4ea;
+  --color-win-text: #137333;
 
-  --color-danger: #d93025;
-  --color-danger-hover: #b31412;
-  --color-danger-bg: #fce8e6;
-  --color-danger-text: #c5221f;
+  --color-lose: #d93025;
+  --color-lose-hover: #b31412;
+  --color-lose-light: #fce8e6;
+  --color-lose-text: #c5221f;
 
-  --color-neutral: #5f6368;
-  --color-neutral-hover: #3c4043;
-  --color-neutral-bg: #f1f3f4;
-  --color-neutral-text: #3c4043;
+  --color-draw: #5f6368;
+  --color-draw-hover: #3c4043;
+  --color-draw-light: #f1f3f4;
+  --color-draw-text: #3c4043;
+
+  --color-success: var(--color-win);
+  --color-success-hover: var(--color-win-hover);
+  --color-success-bg: var(--color-win-light);
+  --color-success-text: var(--color-win-text);
+
+  --color-danger: var(--color-lose);
+  --color-danger-hover: var(--color-lose-hover);
+  --color-danger-bg: var(--color-lose-light);
+  --color-danger-text: var(--color-lose-text);
+
+  --color-neutral: var(--color-draw);
+  --color-neutral-hover: var(--color-draw-hover);
+  --color-neutral-bg: var(--color-draw-light);
+  --color-neutral-text: var(--color-draw-text);
 
   --color-warning: #f29900;
   --color-warning-bg: #fef7e0;
   --color-warning-text: #b06000;
 
-  --bg-app: #f8f9fa;
-  --bg-card: #ffffff;
+  /* Surfaces & Backgrounds */
+  --color-background: #f8f9fa;
+  --color-surface: #ffffff;
+  --color-text: #202124;
+  --color-text-muted: #5f6368;
+  --color-border: #dadce0;
+
+  --bg-app: var(--color-background);
+  --bg-card: var(--color-surface);
   --bg-subtle: #f1f3f4;
 
-  --text-main: #202124;
-  --text-muted: #5f6368;
+  --text-main: var(--color-text);
+  --text-muted: var(--color-text-muted);
   --text-subtle: #80868b;
   --text-inverse: #ffffff;
 
-  --border-color: #dadce0;
+  --border-color: var(--color-border);
   --border-light: #e8eaed;
   --border-focus: #1a73e8;
 
@@ -1233,6 +1256,134 @@ button {
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
+}
+
+/* ==========================================================================
+   Splash Screen Component (Task 5.4)
+   ========================================================================== */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background-color: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.splash-screen--hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.splash-logo-wrap {
+  margin-bottom: 16px;
+  animation: splashPulse 2s infinite ease-in-out;
+}
+
+@keyframes splashPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+.splash-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+}
+
+.splash-slogan {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  max-width: 280px;
+  line-height: 1.4;
+  margin-bottom: 32px;
+}
+
+.splash-loader-bar {
+  width: 180px;
+  height: 4px;
+  background-color: var(--color-primary-light);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  position: relative;
+}
+
+.splash-loader-progress {
+  width: 50%;
+  height: 100%;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-pill);
+  animation: splashProgress 1.2s infinite ease-in-out;
+}
+
+@keyframes splashProgress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.splash-error-box {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.splash-error-text {
+  color: var(--color-danger);
+  font-size: 0.9rem;
+  font-weight: 500;
+  max-width: 280px;
+}
+
+.btn-splash-retry {
+  padding: 10px 20px;
+  background-color: var(--color-primary);
+  color: var(--text-inverse);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ==========================================================================
+   Sync & Refresh Indicator (Task 5.3)
+   ========================================================================== */
+.top-bar__sync-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-time-label {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  display: none;
+}
+
+@media (min-width: 360px) {
+  .sync-time-label {
+    display: inline-block;
+  }
+}
+
+.btn-icon.is-spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Accessibility & Focus Visible */
