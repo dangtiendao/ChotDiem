@@ -12,6 +12,7 @@ const _UTILS_GAME = typeof responseOk !== 'undefined'
       withDocumentLock,
       getHeaderMap,
       getLatestGameNumber,
+      getGameCurrentVersion,
       normalizeString,
       safeJsonParse,
       safeJsonStringify,
@@ -674,8 +675,11 @@ function getGameDetail(gameId) {
     });
   }
 
+  const ss = _UTILS_GAME.getActiveSpreadsheet();
+  const currentVersion = typeof _UTILS_GAME.getGameCurrentVersion === 'function' ? _UTILS_GAME.getGameCurrentVersion(ss, gId) : 1;
   const fullDetail = {
     ...game,
+    version: currentVersion,
     participants: participants
   };
 
@@ -749,6 +753,19 @@ function updateGame(gameId, gameData, expectedVersion) {
         _CFG_GAME.ERROR_CODES.GAME_NOT_EDITABLE,
         'Không thể chỉnh sửa ván đấu đã bị hủy. Hãy khôi phục ván đấu trước.'
       );
+    }
+
+    // Optimistic Concurrency Control
+    if (expectedVersion !== undefined && expectedVersion !== null && expectedVersion !== '') {
+      const currentVer = _UTILS_GAME.getGameCurrentVersion(ss, gId);
+      if (Number(expectedVersion) !== currentVer) {
+        return _UTILS_GAME.responseError(
+          _CFG_GAME.ERROR_CODES.VERSION_CONFLICT,
+          `Ván đấu '${gId}' đã bị chỉnh sửa từ thiết bị khác (Phiên bản hiện tại: v${currentVer}). Vui lòng tải lại trước khi tiếp tục.`,
+          { currentVersion: currentVer, expectedVersion: Number(expectedVersion) },
+          { currentVersion: currentVer }
+        );
+      }
     }
 
     const beforeSnapshot = {
@@ -937,6 +954,18 @@ function cancelGame(gameId, reason = '', expectedVersion) {
           return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_ALREADY_CANCELLED, `Ván đấu '${gId}' đã ở trạng thái hủy.`);
         }
 
+        if (expectedVersion !== undefined && expectedVersion !== null && expectedVersion !== '') {
+          const currentVer = _UTILS_GAME.getGameCurrentVersion(ss, gId);
+          if (Number(expectedVersion) !== currentVer) {
+            return _UTILS_GAME.responseError(
+              _CFG_GAME.ERROR_CODES.VERSION_CONFLICT,
+              `Ván đấu '${gId}' đã bị chỉnh sửa từ thiết bị khác (Phiên bản hiện tại: v${currentVer}). Vui lòng tải lại trước khi tiếp tục.`,
+              { currentVersion: currentVer, expectedVersion: Number(expectedVersion) },
+              { currentVersion: currentVer }
+            );
+          }
+        }
+
         const beforeSnapshot = {
           gameId: gId,
           status: currentStatus,
@@ -1020,6 +1049,18 @@ function restoreGame(gameId, expectedVersion) {
 
         if (currentStatus !== _CFG_GAME.ROUND_STATUS.DA_HUY) {
           return _UTILS_GAME.responseError(_CFG_GAME.ERROR_CODES.GAME_NOT_CANCELLED, `Ván đấu '${gId}' không ở trạng thái bị hủy.`);
+        }
+
+        if (expectedVersion !== undefined && expectedVersion !== null && expectedVersion !== '') {
+          const currentVer = _UTILS_GAME.getGameCurrentVersion(ss, gId);
+          if (Number(expectedVersion) !== currentVer) {
+            return _UTILS_GAME.responseError(
+              _CFG_GAME.ERROR_CODES.VERSION_CONFLICT,
+              `Ván đấu '${gId}' đã bị chỉnh sửa từ thiết bị khác (Phiên bản hiện tại: v${currentVer}). Vui lòng tải lại trước khi tiếp tục.`,
+              { currentVersion: currentVer, expectedVersion: Number(expectedVersion) },
+              { currentVersion: currentVer }
+            );
+          }
         }
 
         const rawJson = String(values[r][colJson] || '');
