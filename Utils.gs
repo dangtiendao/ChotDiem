@@ -221,6 +221,72 @@ function generateNextGameId(existingIds = []) {
   return `V${String(nextNum).padStart(6, '0')}`;
 }
 
+/**
+ * Generates the next sequential Audit ID (e.g. A000001, A000002...).
+ * @param {string[]} existingIds - Array of existing audit IDs
+ * @returns {string} Next audit ID
+ */
+function generateNextAuditId(existingIds = []) {
+  let maxNum = 0;
+  for (const id of existingIds) {
+    const match = String(id || '').match(/^A(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+  const nextNum = maxNum + 1;
+  return `A${String(nextNum).padStart(6, '0')}`;
+}
+
+/**
+ * Records an audit snapshot entry into LICH_SU_THAY_DOI sheet.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss - Active spreadsheet
+ * @param {Object} entry - { gameId, action, beforeData, afterData, reason, version, user }
+ * @returns {string} Generated Audit ID
+ */
+function recordAuditLog(ss, entry) {
+  try {
+    if (!ss) return null;
+    let auditSheet = ss.getSheetByName(_CONFIG.SHEET_NAMES.LICH_SU_THAY_DOI);
+    if (!auditSheet) {
+      auditSheet = ss.insertSheet(_CONFIG.SHEET_NAMES.LICH_SU_THAY_DOI);
+      auditSheet.getRange(1, 1, 1, _CONFIG.HEADERS.LICH_SU_THAY_DOI.length).setValues([_CONFIG.HEADERS.LICH_SU_THAY_DOI]);
+      auditSheet.setFrozenRows(1);
+    }
+
+    const lastRow = auditSheet.getLastRow();
+    const existingIds = [];
+    if (lastRow > 1) {
+      const values = auditSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (const r of values) {
+        if (r[0]) existingIds.push(String(r[0]));
+      }
+    }
+
+    const auditId = generateNextAuditId(existingIds);
+    const now = new Date();
+
+    const row = [
+      auditId,
+      entry.gameId || '',
+      entry.action || _CONFIG.AUDIT_ACTION.EDIT,
+      typeof entry.beforeData === 'object' ? safeJsonStringify(entry.beforeData) : String(entry.beforeData || ''),
+      typeof entry.afterData === 'object' ? safeJsonStringify(entry.afterData) : String(entry.afterData || ''),
+      now,
+      entry.user || 'web_user',
+      entry.reason || '',
+      entry.version || 1
+    ];
+
+    auditSheet.appendRow(row);
+    return auditId;
+  } catch (err) {
+    console.error('[recordAuditLog] Error writing audit log:', err);
+    return null;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     responseOk,
@@ -233,6 +299,8 @@ if (typeof module !== 'undefined' && module.exports) {
     safeJsonStringify,
     formatIsoDate,
     generateNextPlayerId,
-    generateNextGameId
+    generateNextGameId,
+    generateNextAuditId,
+    recordAuditLog
   };
 }
