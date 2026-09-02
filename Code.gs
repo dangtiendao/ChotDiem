@@ -40,6 +40,7 @@ function setupApp(customConfig = {}) {
       const nowIso = new Date().toISOString();
       const defaultRows = [
         [_CFG_CODE.CONFIG_KEYS.TEN_APP, customConfig.appName || _CFG_CODE.DEFAULTS.APP_NAME],
+        [_CFG_CODE.CONFIG_KEYS.SLOGAN, customConfig.slogan || _CFG_CODE.DEFAULTS.SLOGAN],
         [_CFG_CODE.CONFIG_KEYS.MA_PHIEN, customConfig.sessionId || `CP-${Date.now()}`],
         [_CFG_CODE.CONFIG_KEYS.TEN_PHIEN, customConfig.sessionName || 'Phiên chơi mới'],
         [_CFG_CODE.CONFIG_KEYS.CUOC_MAC_DINH, customConfig.defaultBet !== undefined ? customConfig.defaultBet : _CFG_CODE.DEFAULTS.DEFAULT_BET],
@@ -137,6 +138,7 @@ function getAppStatus() {
 
     return _UTILS_CODE.responseOk({
       appName: configMap[_CFG_CODE.CONFIG_KEYS.TEN_APP] || _CFG_CODE.DEFAULTS.APP_NAME,
+      slogan: configMap[_CFG_CODE.CONFIG_KEYS.SLOGAN] || _CFG_CODE.DEFAULTS.SLOGAN,
       sessionId: configMap[_CFG_CODE.CONFIG_KEYS.MA_PHIEN] || '',
       sessionName: configMap[_CFG_CODE.CONFIG_KEYS.TEN_PHIEN] || '',
       defaultBet: configMap[_CFG_CODE.CONFIG_KEYS.CUOC_MAC_DINH] || _CFG_CODE.DEFAULTS.DEFAULT_BET,
@@ -180,6 +182,10 @@ function doGet(e) {
   if (action) {
     let result;
     switch (action) {
+      case 'bootstrap':
+      case 'getAppBootstrapData':
+        result = typeof getAppBootstrapData === 'function' ? getAppBootstrapData(e.parameter.sessionId) : getAppStatus();
+        break;
       case 'status':
         result = getAppStatus();
         break;
@@ -219,7 +225,7 @@ function doGet(e) {
   if (typeof HtmlService !== 'undefined') {
     return HtmlService.createTemplateFromFile('Index')
       .evaluate()
-      .setTitle('Chốt Điểm')
+      .setTitle('Chốt Điểm - Chạm nhanh, tính chuẩn, vui trọn cuộc chơi')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -241,6 +247,10 @@ function doPost(e) {
     const action = postData.action;
 
     switch (action) {
+      case 'bootstrap':
+      case 'getAppBootstrapData':
+        result = typeof getAppBootstrapData === 'function' ? getAppBootstrapData(postData.sessionId) : getAppStatus();
+        break;
       case 'setupApp':
         result = setupApp(postData.config);
         break;
